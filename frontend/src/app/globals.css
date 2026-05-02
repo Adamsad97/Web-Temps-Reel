@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold: #b8860b;
+  --gold-light: #d4a017;
+  --navy: #0e1f40;
+  --navy-mid: #152d5c;
+  --cream: #f8f5ef;
+  --cream-dark: #ede8de;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: var(--cream);
+  color: var(--navy);
+  font-family: Georgia, Cambria, serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Gold divider lines */
+.gold-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--cream-dark); }
+::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 3px; }
+
+/* Badge pulse */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.3); }
+}
+.pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+/* Fade-in */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fade-in 0.35s ease forwards; }
+
+/* Slide-in for messages */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.slide-in-right { animation: slide-in-right 0.25s ease forwards; }
+.slide-in-left  { animation: slide-in-left  0.25s ease forwards; }
+
+/* Elegant button */
+.btn-gold {
+  background: var(--gold);
+  color: var(--cream);
+  border: none;
+  padding: 0.6rem 1.4rem;
+  font-family: Georgia, serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-gold:hover { background: var(--gold-light); }
+.btn-gold:active { transform: scale(0.97); }
+
+.btn-navy {
+  background: var(--navy);
+  color: var(--cream);
+  border: none;
+  padding: 0.6rem 1.4rem;
+  font-family: Georgia, serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-navy:hover { background: var(--navy-mid); }
+
+/* Input */
+.input-avenir {
+  background: white;
+  border: 1px solid var(--gold);
+  padding: 0.6rem 0.9rem;
+  font-family: Georgia, serif;
+  color: var(--navy);
+  outline: none;
+  width: 100%;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-avenir:focus {
+  border-color: var(--gold-light);
+  box-shadow: 0 0 0 3px rgba(184,134,11,0.15);
+}
+
+/* Card */
+.card-avenir {
+  background: white;
+  border: 1px solid var(--cream-dark);
+  box-shadow: 0 2px 12px rgba(14,31,64,0.06);
+}
