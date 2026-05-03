@@ -60,6 +60,34 @@ export interface WSMessage {
     | 'stop_typing'
     | 'auth'
     | 'auth_ok'
-    | 'error';
+    | 'error'
+    | 'discussion_group_created'
+    | 'discussion_group_updated'
+    | 'discussion_group_member_joined'
+    | 'discussion_group_member_left'
+    | 'discussion_group_member_connected'
+    | 'discussion_group_member_disconnected'
+    | 'discussion_group_message';
   payload: unknown;
+}
+
+export interface DiscussionGroup {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  memberIds: string[]; // conseillers invités
+  connectedMemberIds: string[]; // conseillers actuellement connectés au groupe
+}
+
+export interface DiscussionGroupMessage {
+  id: string;
+  groupId: string;
+  fromId: string;
+  fromName: string;
+  fromRole: Role;
+  content: string;
+  createdAt: string;
+  type: 'discussion_group';
 }

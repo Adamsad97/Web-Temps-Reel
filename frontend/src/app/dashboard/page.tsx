@@ -9,10 +9,11 @@ import Header from '@/components/Header';
 import NewsFeed from '@/components/NewsFeed';
 import PrivateChat from '@/components/PrivateChat';
 import GroupChat from '@/components/GroupChat';
+import DiscussionGroups from '@/components/DiscussionGroups';
 import { AdvisorIcon, BuildingIcon, ClientIcon, MessageIcon, NewsIcon } from '@/components/Icons';
-import { Contact, Message, GroupMessage, NewsItem, Notification } from '@/types';
+import { Contact, Message, GroupMessage, NewsItem, Notification, DiscussionGroup } from '@/types';
 
-type Tab = 'news' | 'messages' | 'group';
+type Tab = 'news' | 'messages' | 'group' | 'discussions';
 
 function playNotificationSound(type: 'message' | 'news') {
   try {
@@ -63,6 +64,8 @@ export default function DashboardPage() {
   const [latestGroupMessage, setLatestGroupMessage] = useState<GroupMessage | undefined>();
   const [typingUserId, setTypingUserId] = useState<string | undefined>();
   const [groupTypingUsers, setGroupTypingUsers] = useState<string[]>([]);
+  const [discussionGroups, setDiscussionGroups] = useState<DiscussionGroup[]>([]);
+  const [latestDiscussionEvent, setLatestDiscussionEvent] = useState<{ type: string; payload: Record<string, unknown> } | undefined>();
 
   useEffect(() => {
     if (!loading && !user) router.push('/');
@@ -88,6 +91,20 @@ export default function DashboardPage() {
 
     if (socketMessage.type === 'group_message') {
       setLatestGroupMessage(socketMessage.payload as unknown as GroupMessage);
+      return;
+    }
+
+    if (
+      socketMessage.type === 'discussion_group_created' ||
+      socketMessage.type === 'discussion_group_member_joined' ||
+      socketMessage.type === 'discussion_group_member_left' ||
+      socketMessage.type === 'discussion_group_member_connected' ||
+      socketMessage.type === 'discussion_group_member_disconnected' ||
+      socketMessage.type === 'discussion_group_message' ||
+      socketMessage.type === 'discussion_group_typing' ||
+      socketMessage.type === 'discussion_group_stop_typing'
+    ) {
+      setLatestDiscussionEvent({ type: socketMessage.type, payload: messagePayload });
       return;
     }
 
@@ -176,6 +193,7 @@ export default function DashboardPage() {
     { key: 'news', label: 'Actualités', icon: <NewsIcon size={16} /> },
     { key: 'messages', label: 'Messages', icon: <MessageIcon size={16} /> },
     ...(isStaffMember ? [{ key: 'group' as Tab, label: 'Canal Interne', icon: <BuildingIcon size={16} />, staffOnly: true }] : []),
+    ...(isStaffMember ? [{ key: 'discussions' as Tab, label: 'Groupes', icon: <BuildingIcon size={16} />, staffOnly: true }] : []),
   ];
 
   const roleBadgeText = user.role === 'directeur' ? 'Directeur' : user.role === 'conseiller' ? 'Conseiller' : 'Client';
@@ -277,6 +295,20 @@ export default function DashboardPage() {
               onSend={handleSendGroupMessage}
               newMessage={latestGroupMessage}
               typingNames={groupTypingUsers}
+            />
+          )}
+          {activeTab === 'discussions' && isStaffMember && (
+            <DiscussionGroups
+              groups={discussionGroups}
+              onGroupsChange={(updater) => {
+                if (typeof updater === 'function') {
+                  setDiscussionGroups(prev => (updater as (prev: DiscussionGroup[]) => DiscussionGroup[])(prev));
+                } else {
+                  setDiscussionGroups(updater as DiscussionGroup[]);
+                }
+              }}
+              onSend={(type, payload) => send(type, payload)}
+              latestEvent={latestDiscussionEvent}
             />
           )}
         </main>

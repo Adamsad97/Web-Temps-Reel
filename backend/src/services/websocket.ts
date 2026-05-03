@@ -2,9 +2,18 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { IncomingMessage } from 'http';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { messages, groupMessages, findUserById, users, addNotification } from './db';
+import {
+  messages,
+  groupMessages,
+  findUserById,
+  users,
+  addNotification,
+  discussionGroupMessages,
+  findDiscussionGroupById,
+  createDiscussionGroup,
+} from './db';
 import { sendSSEToUser } from './sse';
-import { AuthPayload, Message, GroupMessage } from '../types';
+import { AuthPayload, Message, GroupMessage, DiscussionGroupMessage } from '../types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'avenir_bank_super_secret_jwt_2024';
 
@@ -41,7 +50,10 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
 
       if (incomingMessage.type === 'auth') {
         try {
-          const decodedToken = jwt.verify(incomingMessage.payload.token as string, JWT_SECRET) as AuthPayload;
+          const decodedToken = jwt.verify(
+            incomingMessage.payload.token as string,
+            JWT_SECRET
+          ) as AuthPayload;
           connectedUserId = decodedToken.userId;
           connectedUserRole = decodedToken.role;
           isAuthenticated = true;
@@ -75,11 +87,19 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         };
         messages.push(privateMessage);
 
-        const outgoingPayload = { type: 'private_message', payload: { ...privateMessage, fromName: sender.name, fromRole: sender.role } };
+        const outgoingPayload = {
+          type: 'private_message',
+          payload: { ...privateMessage, fromName: sender.name, fromRole: sender.role },
+        };
         sendToClient(recipientId, outgoingPayload);
         ws.send(JSON.stringify(outgoingPayload));
 
-        const newNotification = addNotification(recipientId, 'message', `Nouveau message de ${sender.name}`, privateMessage.id);
+        const newNotification = addNotification(
+          recipientId,
+          'message',
+          `Nouveau message de ${sender.name}`,
+          privateMessage.id
+        );
         sendSSEToUser(recipientId, 'notification', newNotification);
         return;
       }
@@ -116,7 +136,10 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
       }
 
       if (incomingMessage.type === 'typing' || incomingMessage.type === 'stop_typing') {
-        const { toId: typingTargetId, channel: typingChannel } = incomingMessage.payload as { toId?: string; channel?: string };
+        const { toId: typingTargetId, channel: typingChannel } = incomingMessage.payload as {
+          toId?: string;
+          channel?: string;
+        };
         const sender = findUserById(connectedUserId);
         if (!sender) return;
 
@@ -125,10 +148,154 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
             .filter(u => STAFF_ROLES.includes(u.role as typeof STAFF_ROLES[number]) && u.id !== connectedUserId)
             .map(u => u.id);
           for (const staffId of otherStaffIds) {
-            sendToClient(staffId, { type: incomingMessage.type, payload: { fromId: connectedUserId, fromName: sender.name, channel: 'group' } });
+            sendToClient(staffId, {
+              type: incomingMessage.type,
+              payload: { fromId: connectedUserId, fromName: sender.name, channel: 'group' },
+            });
           }
         } else if (typingTargetId) {
-          sendToClient(typingTargetId, { type: incomingMessage.type, payload: { fromId: connectedUserId, fromName: sender.name } });
+          sendToClient(typingTargetId, {
+            type: incomingMessage.type,
+            payload: { fromId: connectedUserId, fromName: sender.name },
+          });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'create_discussion_group') {
+        const sender = findUserById(connectedUserId);
+        if (!sender || sender.role !== 'directeur') {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Seul le directeur peut creer des groupes de discussion' } }));
+          return;
+        }
+        const { name, memberIds } = incomingMessage.payload as { name: string; memberIds: string[] };
+        if (!name || !memberIds) return;
+
+        const group = createDiscussionGroup(name, connectedUserId, sender.name, memberIds);
+
+        const notifyIds = new Set([connectedUserId, ...memberIds]);
+        for (const uid of notifyIds) {
+          sendToClient(uid, { type: 'discussion_group_created', payload: group });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'join_discussion_group') {
+        const { groupId } = incomingMessage.payload as { groupId: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender) return;
+        if (!group.memberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+
+        if (!group.memberIds.includes(connectedUserId)) {
+          group.memberIds.push(connectedUserId);
+        }
+        if (!group.connectedMemberIds.includes(connectedUserId)) {
+          group.connectedMemberIds.push(connectedUserId);
+        }
+
+        const joinPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
+        const joinNotifyIds = new Set([group.createdBy, ...group.memberIds]);
+        for (const uid of joinNotifyIds) {
+          sendToClient(uid, { type: 'discussion_group_member_joined', payload: joinPayload });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'connect_discussion_group') {
+        const { groupId } = incomingMessage.payload as { groupId: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender) return;
+        if (!group.memberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+
+        if (!group.connectedMemberIds.includes(connectedUserId)) {
+          group.connectedMemberIds.push(connectedUserId);
+        }
+
+        const connectPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
+        const connectNotifyIds = new Set([group.createdBy, ...group.memberIds]);
+        for (const uid of connectNotifyIds) {
+          sendToClient(uid, { type: 'discussion_group_member_connected', payload: connectPayload });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'disconnect_discussion_group') {
+        const { groupId } = incomingMessage.payload as { groupId: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender) return;
+
+        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== connectedUserId);
+
+        const disconnectPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
+        const disconnectNotifyIds = new Set([group.createdBy, ...group.memberIds]);
+        for (const uid of disconnectNotifyIds) {
+          sendToClient(uid, { type: 'discussion_group_member_disconnected', payload: disconnectPayload });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'leave_discussion_group') {
+        const { groupId } = incomingMessage.payload as { groupId: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender) return;
+
+        group.memberIds = group.memberIds.filter(id => id !== connectedUserId);
+        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== connectedUserId);
+
+        const leavePayload = { groupId, userId: connectedUserId, userName: sender.name, group };
+        const leaveNotifyIds = new Set([group.createdBy, ...group.memberIds, connectedUserId]);
+        for (const uid of leaveNotifyIds) {
+          sendToClient(uid, { type: 'discussion_group_member_left', payload: leavePayload });
+        }
+        return;
+      }
+
+      if (
+        incomingMessage.type === 'discussion_group_typing' ||
+        incomingMessage.type === 'discussion_group_stop_typing'
+      ) {
+        const { groupId } = incomingMessage.payload as { groupId: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender) return;
+
+        const typingNotifyIds = new Set([group.createdBy, ...group.connectedMemberIds]);
+        typingNotifyIds.delete(connectedUserId);
+        for (const uid of typingNotifyIds) {
+          sendToClient(uid, {
+            type: incomingMessage.type,
+            payload: { groupId, fromId: connectedUserId, fromName: sender.name },
+          });
+        }
+        return;
+      }
+
+      if (incomingMessage.type === 'discussion_group_message') {
+        const { groupId, content } = incomingMessage.payload as { groupId: string; content: string };
+        const group = findDiscussionGroupById(groupId);
+        const sender = findUserById(connectedUserId);
+        if (!group || !sender || !content) return;
+        if (!group.connectedMemberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+
+        const dgMessage: DiscussionGroupMessage = {
+          id: uuidv4(),
+          groupId,
+          fromId: connectedUserId,
+          fromName: sender.name,
+          fromRole: sender.role,
+          content,
+          createdAt: new Date().toISOString(),
+          type: 'discussion_group',
+        };
+        discussionGroupMessages.push(dgMessage);
+
+        const dgNotifyIds = new Set([group.createdBy, ...group.connectedMemberIds]);
+        for (const uid of dgNotifyIds) {
+          sendToClient(uid, { type: 'discussion_group_message', payload: dgMessage });
         }
         return;
       }

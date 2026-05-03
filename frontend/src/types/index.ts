@@ -53,3 +53,25 @@ export interface Contact {
   role: Role;
   lastMsg?: Message;
 }
+
+export interface DiscussionGroup {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  memberIds: string[];
+  connectedMemberIds: string[];
+  members?: { id: string; name: string; role: Role }[];
+}
+
+export interface DiscussionGroupMessage {
+  id: string;
+  groupId: string;
+  fromId: string;
+  fromName: string;
+  fromRole: Role;
+  content: string;
+  createdAt: string;
+  type: 'discussion_group';
+}

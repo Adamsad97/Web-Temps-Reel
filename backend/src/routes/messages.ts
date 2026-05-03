@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { authMiddleware, AuthRequest, requireRole } from '../middleware/auth';
-import { messages, groupMessages, users } from '../services/db';
+import { messages, groupMessages, users, discussionGroups, getDiscussionGroupMessages } from '../services/db';
 
 const router = Router();
 
@@ -65,6 +65,46 @@ router.get('/conversations', authMiddleware, (req: AuthRequest, res: Response) =
 
     res.json(staffContacts);
   }
+});
+
+// Discussion Groups
+router.get('/discussion-groups', authMiddleware, requireRole('conseiller', 'directeur'), (req: AuthRequest, res: Response) => {
+  const currentUserId = req.user!.userId;
+  const currentUserRole = req.user!.role;
+
+  // Directeur sees all groups; conseiller sees only groups they're in
+  const visibleGroups = currentUserRole === 'directeur'
+    ? discussionGroups
+    : discussionGroups.filter(g => g.memberIds.includes(currentUserId));
+
+  // Enrich with member names
+  const enriched = visibleGroups.map(g => ({
+    ...g,
+    members: g.memberIds.map(id => {
+      const u = users.find(u => u.id === id);
+      return u ? { id: u.id, name: u.name, role: u.role } : null;
+    }).filter(Boolean),
+  }));
+
+  res.json(enriched);
+});
+
+router.get('/discussion-groups/conseillers', authMiddleware, requireRole('directeur'), (_req: AuthRequest, res: Response) => {
+  const conseillers = users
+    .filter(u => u.role === 'conseiller')
+    .map(u => ({ id: u.id, name: u.name, role: u.role }));
+  res.json(conseillers);
+});
+
+router.get('/discussion-groups/:groupId/messages', authMiddleware, requireRole('conseiller', 'directeur'), (req: AuthRequest, res: Response) => {
+  const currentUserId = req.user!.userId;
+  const currentUserRole = req.user!.role;
+  const group = discussionGroups.find(g => g.id === req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
+  if (currentUserRole !== 'directeur' && !group.memberIds.includes(currentUserId)) {
+    return res.status(403).json({ error: 'Accès refusé' });
+  }
+  return res.json(getDiscussionGroupMessages(req.params.groupId));
 });
 
 export default router;
