@@ -30,7 +30,7 @@ docker compose down
 ## Comptes de test (Fixtures)
 
 **Client**  
-Email : pascall@avenir.fr
+Email : pascal@avenir.fr
 password: Pascal1234!
 
 **Conseiller**  
