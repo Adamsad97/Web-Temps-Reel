@@ -19,45 +19,33 @@ export async function seedDatabase(): Promise<void> {
   const primaryTestAccounts: User[] = [
     {
       id: 'user-client-01',
-      email: 'client@avenir.fr',
-      password: hashPassword('Client1234!'),
-      name: 'Alice Martin',
+      email: 'pascal@avenir.fr',
+      password: hashPassword('Pascal1234!'),
+      name: 'Florent PASCAL',
       role: 'client',
       createdAt: currentTimestamp,
     },
     {
       id: 'user-conseiller-01',
-      email: 'conseiller@avenir.fr',
-      password: hashPassword('Conseiller1234!'),
-      name: 'Bruno Dupont',
+      email: 'dupont@avenir.fr',
+      password: hashPassword('Dupont1234!'),
+      name: 'Izaac DUPONT',
       role: 'conseiller',
       createdAt: currentTimestamp,
     },
     {
       id: 'user-directeur-01',
-      email: 'directeur@avenir.fr',
-      password: hashPassword('Directeur1234!'),
-      name: 'Claire Fontaine',
+      email: 'diawara@avenir.fr',
+      password: hashPassword('Diawara1234!'),
+      name: 'Adama DIAWARA',
       role: 'directeur',
       createdAt: currentTimestamp,
     },
   ];
 
-  const additionalClients: User[] = [
-    { id: uuidv4(), email: 'marc@avenir.fr', password: hashPassword('pass'), name: 'Marc Leblanc', role: 'client', createdAt: currentTimestamp },
-    { id: uuidv4(), email: 'sophie@avenir.fr', password: hashPassword('pass'), name: 'Sophie Bernard', role: 'client', createdAt: currentTimestamp },
-  ];
+ 
 
-  const secondConseiller: User = {
-    id: 'user-conseiller-02',
-    email: 'conseiller2@avenir.fr',
-    password: hashPassword('pass'),
-    name: 'David Moreau',
-    role: 'conseiller',
-    createdAt: currentTimestamp,
-  };
-
-  users.push(...primaryTestAccounts, ...additionalClients, secondConseiller);
+  users.push(...primaryTestAccounts);
 }
 
 export const findUserById = (userId: string): User | undefined => users.find(u => u.id === userId);

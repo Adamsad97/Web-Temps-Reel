@@ -27,7 +27,7 @@ interface ConnectedStaffClient {
 
 const connectedClients = new Map<string, ConnectedStaffClient>();
 
-/** Send a WebSocket payload to a single connected user (no-op if offline). */
+
 function sendToConnectedClient(targetUserId: string, payload: object): void {
   const client = connectedClients.get(targetUserId);
   if (client && client.ws.readyState === WebSocket.OPEN) {
@@ -35,15 +35,12 @@ function sendToConnectedClient(targetUserId: string, payload: object): void {
   }
 }
 
-/** Send the same WebSocket payload to a set of connected users. */
+
 function broadcastToConnectedUsers(userIds: Iterable<string>, payload: object): void {
   for (const userId of userIds) sendToConnectedClient(userId, payload);
 }
 
-/**
- * Delivers a push notification to a user via SSE + Web Push.
- * Used for events that must reach users even when the app is in the background.
- */
+
 function deliverPushNotificationToUser(
   recipientUserId: string,
   notificationTitle: string,
@@ -55,11 +52,7 @@ function deliverPushNotificationToUser(
   sendWebPushToUser(recipientUserId, notificationTitle, notificationBody, notificationTag).catch(() => {});
 }
 
-/**
- * Broadcasts a system event (join/leave/connect/disconnect) to all group members.
- * Includes the actorUserId so the frontend can personalise the message
- * ("Vous avez rejoint" vs "Adama a rejoint") based on who is viewing.
- */
+
 function broadcastGroupSystemEvent(
   groupId: string,
   memberIds: string[],
@@ -98,7 +91,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Authentication ───────────────────────────────────────
+      
       if (incomingMessage.type === 'auth') {
         try {
           const decodedToken = jwt.verify(
@@ -125,7 +118,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Private message ──────────────────────────────────────
+      
       if (incomingMessage.type === 'private_message') {
         const { toId: recipientId, content: messageContent } = incomingMessage.payload as {
           toId: string;
@@ -161,7 +154,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Group channel message (Canal Interne) ────────────────
+      
       if (incomingMessage.type === 'group_message') {
         const { content: messageContent } = incomingMessage.payload as { content: string };
         const sender = findUserById(currentUserId);
@@ -184,7 +177,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
 
         broadcastToConnectedUsers(allStaffIds, { type: 'group_message', payload: groupMessage });
 
-        // Push notification to staff members who are currently offline
+        
         const offlineStaffIds = allStaffIds.filter(
           id => id !== currentUserId && !connectedClients.has(id)
         );
@@ -199,7 +192,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Typing indicators (private + group channel) ──────────
+      
       if (incomingMessage.type === 'typing' || incomingMessage.type === 'stop_typing') {
         const { toId: recipientId, channel: messageChannel } = incomingMessage.payload as {
           toId?: string;
@@ -225,7 +218,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: create ─────────────────────────────
+      
       if (incomingMessage.type === 'create_discussion_group') {
         const creator = findUserById(currentUserId);
         if (!creator || creator.role !== 'directeur') {
@@ -253,7 +246,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: join ───────────────────────────────
+      
       if (incomingMessage.type === 'join_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
@@ -273,7 +266,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: connect ────────────────────────────
+      
       if (incomingMessage.type === 'connect_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
@@ -292,7 +285,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: disconnect ─────────────────────────
+      
       if (incomingMessage.type === 'disconnect_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
@@ -310,7 +303,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: leave ──────────────────────────────
+      
       if (incomingMessage.type === 'leave_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
@@ -330,7 +323,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: typing indicators ──────────────────
+      
       if (
         incomingMessage.type === 'discussion_group_typing' ||
         incomingMessage.type === 'discussion_group_stop_typing'
@@ -349,7 +342,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
-      // ── Discussion group: send message ───────────────────────
+      
       if (incomingMessage.type === 'discussion_group_message') {
         const { groupId, content: messageContent } = incomingMessage.payload as {
           groupId: string;
@@ -378,7 +371,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
           payload: groupMessage,
         });
 
-        // Push notification to all group members who are not currently connected
+        
         const allGroupMemberIds = new Set([group.createdBy, ...group.memberIds]);
         allGroupMemberIds.delete(currentUserId);
         for (const memberId of allGroupMemberIds) {

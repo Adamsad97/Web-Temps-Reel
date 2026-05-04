@@ -102,7 +102,7 @@ export default function DashboardPage() {
     if (msg.type === 'private_message') {
       const pm = msg.payload as Message & { fromName?: string; fromRole?: string };
       setLatestPrivateMessage(pm);
-      // If not currently viewing this conversation → toast
+      
       if (activeTabRef.current !== 'messages' || selectedContactRef.current?.id !== pm.fromId) {
         addToast(setToasts, { title: pm.fromName || 'Message', body: (pm.content || '').slice(0, 80), icon: '💬', kind: 'msg' });
       }
@@ -118,14 +118,14 @@ export default function DashboardPage() {
     }
     if (['discussion_group_created','discussion_group_member_joined','discussion_group_member_left','discussion_group_member_connected','discussion_group_member_disconnected','discussion_group_message','discussion_group_typing','discussion_group_stop_typing','discussion_group_system'].includes(msg.type)) {
       setLatestDiscussionEvent({ type: msg.type, payload });
-      // Toast for system events
+     
       if (msg.type === 'discussion_group_system') {
         const { eventType, userName } = payload as { eventType: string; userName: string };
         if (eventType === 'joined' || eventType === 'left') {
           addToast(setToasts, { title: 'Groupe de discussion', body: eventType === 'joined' ? `${userName} vient de rejoindre la discussion` : `${userName} a quitté la discussion`, icon: eventType === 'joined' ? '✦' : '✦', kind: 'sys' });
         }
       }
-      // Toast for new group message if not viewing
+      
       if (msg.type === 'discussion_group_message' && activeTabRef.current !== 'discussions') {
         const dm = payload as DiscussionGroupMessage;
         addToast(setToasts, { title: `Groupe — ${dm.fromName}`, body: (dm.content || '').slice(0, 80), icon: '💬', kind: 'group' });

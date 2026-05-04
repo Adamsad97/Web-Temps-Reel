@@ -29,15 +29,16 @@ docker compose down
 
 ## Comptes de test (Fixtures)
 
+**Client**  
+Email : pascall@avenir.fr
+password: Pascal1234!
+
+**Conseiller**  
+Email : dupont@avenir.fr
+Password : Dupont1234!
+
+**Directeur**  
+Email : diawara@avenir.fr
+Password : Diawara1234!
+
 Les fixtures sont créées automatiquement au démarrage. Aucune action supplémentaire requise.
-
-| Rôle              | Email                  | Mot de passe      |
-| ----------------- | ---------------------- | ----------------- |
-| 👤 **Client**     | `client@avenir.fr`     | `Client1234!`     |
-| 👔 **Conseiller** | `conseiller@avenir.fr` | `Conseiller1234!` |
-| 🏛 **Directeur**  | `directeur@avenir.fr`  | `Directeur1234!`  |
-
-Des comptes supplémentaires sont également disponibles :
-
-- Conseiller 2 : `conseiller2@avenir.fr` / `pass`
-- Client 2 : `marc@avenir.fr` / `pass`
