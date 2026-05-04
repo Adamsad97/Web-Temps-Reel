@@ -4,7 +4,9 @@ import { Message, Contact } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
 
-interface Props {
+const TYPING_STOP_DELAY_MS = 2000;
+
+interface PrivateChatProps {
   contact: Contact;
   onSend: (toId: string, content: string) => void;
   onTyping: (toId: string) => void;
@@ -13,7 +15,7 @@ interface Props {
   typingFrom?: string;
 }
 
-export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, newMessage, typingFrom }: Props) {
+export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, newMessage, typingFrom }: PrivateChatProps) {
   const { user, token } = useAuth();
   const [messages, setMessages] = useState<(Message & { fromName?: string; fromRole?: string })[]>([]);
   const [input, setInput] = useState('');
@@ -32,7 +34,7 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
       (newMessage.fromId === contact.id && newMessage.toId === user?.id) ||
       (newMessage.fromId === user?.id && newMessage.toId === contact.id);
     if (!isRelevant) return;
-    setMessages(prev => prev.some(m => m.id === newMessage.id) ? prev : [...prev, newMessage]);
+    setMessages(prev => prev.some(existingMessage => existingMessage.id === newMessage.id) ? prev : [...prev, newMessage]);
   }, [newMessage, contact.id, user?.id]);
 
   useEffect(() => {
@@ -43,14 +45,17 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
     setInput(e.target.value);
     if (!isTypingRef.current) { isTypingRef.current = true; onTyping(contact.id); }
     if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => { isTypingRef.current = false; onStopTyping(contact.id); }, 2000);
+    typingTimer.current = setTimeout(() => { isTypingRef.current = false; onStopTyping(contact.id); }, TYPING_STOP_DELAY_MS);
   };
 
   const handleSend = () => {
-    const c = input.trim(); if (!c) return;
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return;
     if (typingTimer.current) clearTimeout(typingTimer.current);
-    isTypingRef.current = false; onStopTyping(contact.id);
-    onSend(contact.id, c); setInput('');
+    isTypingRef.current = false;
+    onStopTyping(contact.id);
+    onSend(contact.id, trimmedInput);
+    setInput('');
   };
 
   const roleLabel = (role?: string) => role === 'directeur' ? 'Directeur' : role === 'conseiller' ? 'Conseiller' : 'Client';
@@ -58,7 +63,6 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      {/* Header */}
       <div style={{
         padding: '14px 20px', background: 'var(--white)',
         borderBottom: '1px solid var(--border)',
@@ -81,7 +85,6 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
         </div>
       </div>
 
-      {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
         {messages.length === 0 && (
           <div style={{ textAlign: 'center', paddingTop: 60, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -89,10 +92,10 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {messages.map((msg, i) => {
+          {messages.map((msg, messageIndex) => {
             const isMine = msg.fromId === user?.id;
             return (
-              <div key={msg.id || i} className={isMine ? 'slide-in-right' : 'slide-in-left'}
+              <div key={msg.id || messageIndex} className={isMine ? 'slide-in-right' : 'slide-in-left'}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
                 {!isMine && (
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 3, paddingLeft: 4 }}>
@@ -120,7 +123,6 @@ export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, n
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div style={{ padding: '12px 20px', background: 'var(--white)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
         <input className="input-avenir" placeholder={`Message à ${contact.name}…`}
           value={input} onChange={handleInputChange} onKeyDown={e => e.key === 'Enter' && handleSend()} />

@@ -4,6 +4,8 @@ import { GroupMessage } from '@/types';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 
+const TYPING_STOP_DELAY_MS = 2000;
+
 interface GroupChatProps {
   onSendMessage: (content: string) => void;
   onStartTyping: () => void;
@@ -26,24 +28,21 @@ export default function GroupChat({
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCurrentlyTypingRef = useRef(false);
 
-  // Load message history on mount
   useEffect(() => {
     apiFetch<GroupMessage[]>('/api/messages/group', token)
       .then(setMessageHistory)
       .catch(() => {});
   }, [token]);
 
-  // Append new incoming messages in real-time
   useEffect(() => {
     if (!latestIncomingMessage) return;
     setMessageHistory(previous =>
-      previous.some(m => m.id === latestIncomingMessage.id)
+      previous.some(existingMessage => existingMessage.id === latestIncomingMessage.id)
         ? previous
         : [...previous, latestIncomingMessage]
     );
   }, [latestIncomingMessage]);
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messageHistory, currentlyTypingNames]);
@@ -58,7 +57,7 @@ export default function GroupChat({
     typingTimeoutRef.current = setTimeout(() => {
       isCurrentlyTypingRef.current = false;
       onStopTyping();
-    }, 2000);
+    }, TYPING_STOP_DELAY_MS);
   };
 
   const handleSendMessage = () => {
@@ -86,7 +85,6 @@ export default function GroupChat({
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
 
-      {/* Channel header */}
       <div style={{ padding: '14px 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, var(--slate-900) 0%, var(--slate-700) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -116,7 +114,6 @@ export default function GroupChat({
         </div>
       </div>
 
-      {/* Message list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
         {messageHistory.length === 0 && currentlyTypingNames.length === 0 && (
           <div style={{ textAlign: 'center', paddingTop: 60, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -153,7 +150,6 @@ export default function GroupChat({
           })}
         </div>
 
-        {/* Typing indicator in message area */}
         {currentlyTypingNames.length > 0 && (
           <div className="sys-pill typing" style={{ marginTop: 10 }}>
             <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -170,7 +166,6 @@ export default function GroupChat({
         <div ref={messagesBottomRef} />
       </div>
 
-      {/* Message input */}
       <div style={{ padding: '12px 20px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
         <input
           className="input-avenir"

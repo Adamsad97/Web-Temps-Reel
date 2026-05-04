@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';;
+import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { users, findUserByEmail } from '../services/db';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
@@ -10,6 +10,7 @@ const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'avenir_bank_super_secret_jwt_2024';
 const JWT_EXPIRATION = '24h';
 const BCRYPT_SALT_ROUNDS = 10;
+const DEFAULT_NEW_USER_ROLE: Role = 'client';
 
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body as { email: string; password: string };
@@ -47,7 +48,7 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
-  const newUser = { id: uuidv4(), email, password: hashedPassword, name, role: 'client' as Role, createdAt: new Date().toISOString() };
+  const newUser = { id: uuidv4(), email, password: hashedPassword, name, role: DEFAULT_NEW_USER_ROLE, createdAt: new Date().toISOString() };
   users.push(newUser);
 
   const authToken = jwt.sign({ userId: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
@@ -55,7 +56,7 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
-  const currentUser = users.find(u => u.id === req.user!.userId);
+  const currentUser = users.find(registeredUser => registeredUser.id === req.user!.userId);
   if (!currentUser) {
     res.status(404).json({ error: 'User not found' });
     return;

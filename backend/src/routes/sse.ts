@@ -56,11 +56,9 @@ router.post('/news', authMiddleware, requireRole('conseiller', 'directeur'), (re
   };
   news.push(newsItem);
 
-  // Broadcast news article to ALL connected users via SSE
   broadcastSSE('news', newsItem);
 
-  // Send notification to ALL users EXCEPT the author
-  const allOtherUsers = users.filter(u => u.id !== author.id);
+  const allOtherUsers = users.filter(registeredUser => registeredUser.id !== author.id);
   for (const targetUser of allOtherUsers) {
     const notification = addNotification(
       targetUser.id,
@@ -76,12 +74,12 @@ router.post('/news', authMiddleware, requireRole('conseiller', 'directeur'), (re
 
 router.get('/notifications', authMiddleware, (req: AuthRequest, res: Response) => {
   const userId = req.user!.userId;
-  const userNotifications = notifications.filter(n => n.userId === userId).reverse();
+  const userNotifications = notifications.filter(savedNotification => savedNotification.userId === userId).reverse();
   res.json(userNotifications);
 });
 
 router.patch('/notifications/:id/read', authMiddleware, (req: AuthRequest, res: Response) => {
-  const targetNotification = notifications.find(n => n.id === req.params.id && n.userId === req.user!.userId);
+  const targetNotification = notifications.find(savedNotification => savedNotification.id === req.params.id && savedNotification.userId === req.user!.userId);
   if (!targetNotification) {
     res.status(404).json({ error: 'Not found' });
     return;

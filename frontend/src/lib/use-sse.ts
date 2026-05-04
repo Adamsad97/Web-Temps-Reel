@@ -8,6 +8,9 @@ type SSEEventHandler = (eventName: string, data: unknown) => void;
 export type SSEConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 const SSE_RECONNECT_DELAY_MS = 5000;
+const SSE_EVENT_LINE_PREFIX = 'event:';
+const SSE_DATA_LINE_PREFIX = 'data:';
+const SSE_DEFAULT_EVENT_NAME = 'message';
 
 export function useSSE(authToken: string | null, onEvent: SSEEventHandler) {
   const handlerRef = useRef<SSEEventHandler>(onEvent);
@@ -38,7 +41,7 @@ export function useSSE(authToken: string | null, onEvent: SSEEventHandler) {
         const streamReader = response.body.getReader();
         const textDecoder = new TextDecoder();
         let rawBuffer = '';
-        let currentEventName = 'message';
+        let currentEventName = SSE_DEFAULT_EVENT_NAME;
 
         while (isConnectionActive) {
           const { done, value } = await streamReader.read();
@@ -49,14 +52,14 @@ export function useSSE(authToken: string | null, onEvent: SSEEventHandler) {
           rawBuffer = rawLines.pop() || '';
 
           for (const line of rawLines) {
-            if (line.startsWith('event:')) {
-              currentEventName = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
+            if (line.startsWith(SSE_EVENT_LINE_PREFIX)) {
+              currentEventName = line.slice(SSE_EVENT_LINE_PREFIX.length).trim();
+            } else if (line.startsWith(SSE_DATA_LINE_PREFIX)) {
               try {
-                const parsedData = JSON.parse(line.slice(5).trim());
+                const parsedData = JSON.parse(line.slice(SSE_DATA_LINE_PREFIX.length).trim());
                 handlerRef.current(currentEventName, parsedData);
               } catch {}
-              currentEventName = 'message';
+              currentEventName = SSE_DEFAULT_EVENT_NAME;
             }
           }
         }

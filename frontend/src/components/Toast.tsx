@@ -10,12 +10,14 @@ export interface ToastItem {
   removing?: boolean;
 }
 
-interface Props { toasts: ToastItem[]; onRemove: (id: string) => void; }
+const TOAST_AUTO_REMOVE_DELAY_MS = 5000;
 
-export default function Toast({ toasts, onRemove }: Props) {
+interface ToastProps { toasts: ToastItem[]; onRemove: (id: string) => void; }
+
+export default function Toast({ toasts, onRemove }: ToastProps) {
   useEffect(() => {
-    toasts.filter(t => !t.removing).forEach(t => {
-      const timer = setTimeout(() => onRemove(t.id), 5000);
+    toasts.filter(toast => !toast.removing).forEach(toast => {
+      const timer = setTimeout(() => onRemove(toast.id), TOAST_AUTO_REMOVE_DELAY_MS);
       return () => clearTimeout(timer);
     });
   }, [toasts, onRemove]);
@@ -23,12 +25,12 @@ export default function Toast({ toasts, onRemove }: Props) {
   if (toasts.length === 0) return null;
   return (
     <div id="toast-root">
-      {toasts.map(t => (
-        <div key={t.id} className={`toast-card toast-${t.kind}${t.removing ? ' toast-out' : ''}`} onClick={() => onRemove(t.id)}>
-          <span className="toast-icon">{t.icon}</span>
+      {toasts.map(toast => (
+        <div key={toast.id} className={`toast-card toast-${toast.kind}${toast.removing ? ' toast-out' : ''}`} onClick={() => onRemove(toast.id)}>
+          <span className="toast-icon">{toast.icon}</span>
           <div>
-            <div className="toast-title">{t.title}</div>
-            <div className="toast-body">{t.body}</div>
+            <div className="toast-title">{toast.title}</div>
+            <div className="toast-body">{toast.body}</div>
           </div>
         </div>
       ))}

@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { AuthPayload } from '../types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'avenir_bank_super_secret_jwt_2024';
+const BEARER_TOKEN_PREFIX = 'Bearer ';
 
 export interface AuthRequest extends Request {
   user?: AuthPayload;
@@ -10,11 +11,11 @@ export interface AuthRequest extends Request {
 
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
   const authorizationHeader = req.headers.authorization;
-  if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
+  if (!authorizationHeader || !authorizationHeader.startsWith(BEARER_TOKEN_PREFIX)) {
     res.status(401).json({ error: 'Missing token' });
     return;
   }
-  const token = authorizationHeader.slice(7);
+  const token = authorizationHeader.slice(BEARER_TOKEN_PREFIX.length);
   try {
     const decodedPayload = jwt.verify(token, JWT_SECRET) as AuthPayload;
     req.user = decodedPayload;

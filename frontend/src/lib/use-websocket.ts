@@ -9,6 +9,7 @@ export type WebSocketConnectionStatus = 'connecting' | 'connected' | 'reconnecti
 
 const RECONNECT_DELAY_MS = 3000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+const WEBSOCKET_PATH = '/ws';
 
 export function useWebSocket(authToken: string | null, onMessage: IncomingMessageHandler) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -23,7 +24,7 @@ export function useWebSocket(authToken: string | null, onMessage: IncomingMessag
     if (!authToken) return;
 
     setConnectionStatus('connecting');
-    const ws = new WebSocket(`${WEBSOCKET_URL}/ws`);
+    const ws = new WebSocket(`${WEBSOCKET_URL}${WEBSOCKET_PATH}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

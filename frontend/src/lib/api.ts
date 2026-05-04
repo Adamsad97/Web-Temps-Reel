@@ -1,17 +1,18 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const BEARER_TOKEN_PREFIX = 'Bearer ';
 
 export async function apiFetch<T>(path: string, token: string | null, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
+  const httpResponse = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { Authorization: `${BEARER_TOKEN_PREFIX}${token}` } : {}),
       ...options?.headers,
     },
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Request failed');
+  if (!httpResponse.ok) {
+    const errorResponse = await httpResponse.json().catch(() => ({}));
+    throw new Error(errorResponse.error || 'Request failed');
   }
-  return res.json();
+  return httpResponse.json();
 }
