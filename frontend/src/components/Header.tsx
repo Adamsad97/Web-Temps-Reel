@@ -2,13 +2,6 @@
 import { useAuth } from '@/lib/auth-context';
 import { Notification } from '@/types';
 import { useRouter } from 'next/navigation';
-import { BellIcon } from '@/components/Icons';
-
-const ROLE_LABELS: Record<string, string> = {
-  client: 'Client',
-  conseiller: 'Conseiller',
-  directeur: 'Directeur',
-};
 
 interface Props {
   notifications: Notification[];
@@ -18,84 +11,56 @@ interface Props {
   realtimeStatus: 'online' | 'reconnecting' | 'partial';
 }
 
+const ROLES: Record<string, string> = { client:'Client', conseiller:'Conseiller', directeur:'Directeur' };
+
 export default function Header({ notifications, onBellClick, showNotifications, onMarkRead, realtimeStatus }: Props) {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
-
-  const statusLabel = realtimeStatus === 'online'
-    ? 'Temps réel actif'
-    : realtimeStatus === 'reconnecting'
-      ? 'Reconnexion…'
-      : 'Connexion partielle';
-
-  const statusColors = realtimeStatus === 'online'
-    ? { bg: 'rgba(34, 197, 94, 0.12)', dot: '#22c55e', text: '#d1fae5' }
-    : realtimeStatus === 'reconnecting'
-      ? { bg: 'rgba(245, 158, 11, 0.15)', dot: '#f59e0b', text: '#fde68a' }
-      : { bg: 'rgba(239, 68, 68, 0.15)', dot: '#ef4444', text: '#fecaca' };
+  const unread = notifications.filter(n => !n.read).length;
+  const statusDot = realtimeStatus === 'online' ? '#5aa87a' : realtimeStatus === 'reconnecting' ? '#d4924a' : '#b85050';
+  const statusLabel = realtimeStatus === 'online' ? 'En ligne' : realtimeStatus === 'reconnecting' ? 'Reconnexion…' : 'Hors ligne';
 
   return (
-    <header className="h-16 flex items-center px-6 justify-between relative z-50"
-      style={{ background: 'var(--navy)', borderBottom: '1px solid var(--gold)' }}>
-      <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push('/dashboard')}>
-        <span className="text-xl tracking-[0.15em]" style={{ color: 'var(--gold)', fontFamily: 'Georgia, serif' }}>
-          AVENIR
-        </span>
-        <span className="text-xs tracking-widest uppercase hidden sm:block" style={{ color: 'rgba(248,245,239,0.5)' }}>
-          Banque Privée
-        </span>
+    <header style={{ background:'linear-gradient(135deg,var(--slate-900) 0%,var(--slate-800) 100%)', borderBottom:'1px solid var(--bronze-border)', height:62, display:'flex', alignItems:'center', padding:'0 1.5rem', justifyContent:'space-between', zIndex:50, boxShadow:'0 2px 14px rgba(0,0,0,.22)', position:'relative' }}>
+      <div onClick={() => router.push('/dashboard')} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+        <div style={{ width:38, height:38, borderRadius:9, background:'linear-gradient(135deg,var(--bronze) 0%,var(--bronze-light) 100%)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 2px 10px rgba(181,129,62,.4)' }}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3" stroke="var(--slate-900)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+        <div>
+          <div style={{ fontFamily:'var(--font-display)', fontWeight:700, fontSize:'1.05rem', color:'var(--bronze)', letterSpacing:'.1em' }}>AVENIR</div>
+          <div style={{ fontSize:'.62rem', color:'rgba(246,247,249,.4)', letterSpacing:'.12em', textTransform:'uppercase', lineHeight:1 }}>Banque Privée</div>
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div
-          className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs tracking-wide"
-          style={{ background: statusColors.bg, color: statusColors.text }}
-          title={statusLabel}
-        >
-          <span className="w-2 h-2 rounded-full" style={{ background: statusColors.dot }} />
-          <span>{statusLabel}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 12px', borderRadius:99, background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.1)' }}>
+          <span style={{ width:7, height:7, borderRadius:'50%', background:statusDot, boxShadow:`0 0 7px ${statusDot}`, display:'inline-block' }}/>
+          <span style={{ fontSize:'.74rem', color:'rgba(246,247,249,.75)' }}>{statusLabel}</span>
+        </div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:'.9rem', fontWeight:700, color:'var(--slate-50)', lineHeight:1.2 }}>{user?.name}</div>
+          <div style={{ fontSize:'.7rem', color:'var(--bronze)', letterSpacing:'.05em' }}>{ROLES[user?.role||'']}</div>
         </div>
 
-        <div className="text-right hidden sm:block">
-          <p className="text-sm" style={{ color: 'var(--cream)' }}>{user?.name}</p>
-          <p className="text-xs" style={{ color: 'var(--gold)' }}>{ROLE_LABELS[user?.role || '']}</p>
-        </div>
-
-        <div className="relative">
-          <button onClick={onBellClick} className="relative w-9 h-9 flex items-center justify-center rounded-full transition-colors"
-            style={{ background: 'rgba(184,134,11,0.15)' }}>
-            <BellIcon size={18} style={{ color: 'var(--gold)' }} />
-            {unreadNotificationCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-xs flex items-center justify-center pulse-dot"
-                style={{ background: 'var(--gold)', color: 'var(--navy)', fontWeight: 700 }}>
-                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
-              </span>
-            )}
+        {/* Bell */}
+        <div style={{ position:'relative' }}>
+          <button onClick={onBellClick} style={{ width:38, height:38, borderRadius:9, background:'rgba(181,129,62,.14)', border:'1px solid var(--bronze-border)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" stroke="var(--bronze)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            {unread > 0 && <span className="pulse-dot" style={{ position:'absolute', top:-4, right:-4, width:18, height:18, borderRadius:'50%', background:'linear-gradient(135deg,var(--bronze) 0%,var(--bronze-light) 100%)', color:'var(--slate-900)', fontSize:'.64rem', fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid var(--slate-900)' }}>{unread>9?'9+':unread}</span>}
           </button>
-
           {showNotifications && (
-            <div className="absolute right-0 top-12 w-80 card-avenir z-50 max-h-96 overflow-y-auto fade-in">
-              <div className="p-3 border-b" style={{ borderColor: 'var(--cream-dark)' }}>
-                <p className="text-xs tracking-widest uppercase" style={{ color: 'var(--gold)' }}>Notifications</p>
+            <div className="fade-in" style={{ position:'absolute', right:0, top:46, width:320, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--r-lg)', boxShadow:'var(--shadow-lg)', maxHeight:400, overflowY:'auto', zIndex:100 }}>
+              <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <span style={{ fontSize:'.72rem', fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase', color:'var(--bronze-dark)' }}>Notifications</span>
+                {unread>0&&<span style={{ fontSize:'.68rem', fontWeight:700, background:'var(--bronze-subtle)', color:'var(--bronze-dark)', borderRadius:99, padding:'2px 8px' }}>{unread} non lue{unread>1?'s':''}</span>}
               </div>
-              {notifications.length === 0 && (
-                <div className="p-4 flex justify-center">
-                  <span className="h-3 w-3 rounded-full" style={{ background: 'rgba(14,31,64,0.2)' }} aria-hidden="true" />
-                </div>
-              )}
-              {notifications.map(n => (
-                <div key={n.id} onClick={() => onMarkRead(n.id)}
-                  className="p-3 border-b cursor-pointer hover:bg-amber-50 transition-colors"
-                  style={{ borderColor: 'var(--cream-dark)', background: n.read ? 'white' : 'rgba(184,134,11,0.06)' }}>
-                  <div className="flex items-start gap-2">
-                    {!n.read && <span className="w-2 h-2 rounded-full mt-1 flex-shrink-0 pulse-dot" style={{ background: 'var(--gold)' }} />}
-                    <div>
-                      <p className="text-sm" style={{ color: 'var(--navy)' }}>{n.content}</p>
-                      <p className="text-xs mt-1" style={{ color: 'var(--gold)' }}>
-                        {new Date(n.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
+              {notifications.length===0&&<div style={{ padding:24, textAlign:'center', color:'var(--text-muted)', fontSize:'.85rem' }}>Aucune notification</div>}
+              {notifications.map(n=>(
+                <div key={n.id} onClick={()=>onMarkRead(n.id)} style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', cursor:'pointer', background:n.read?'transparent':'rgba(181,129,62,.05)', display:'flex', gap:10, alignItems:'flex-start' }}>
+                  <span style={{ width:8, height:8, borderRadius:'50%', flexShrink:0, marginTop:5, background:n.read?'var(--border)':'var(--bronze)', boxShadow:n.read?'none':`0 0 5px var(--bronze)` }}/>
+                  <div>
+                    <p style={{ fontSize:'.85rem', color:'var(--text)', lineHeight:1.45 }}>{n.content}</p>
+                    <p style={{ fontSize:'.72rem', color:'var(--text-muted)', marginTop:3 }}>{new Date(n.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</p>
                   </div>
                 </div>
               ))}
@@ -103,11 +68,7 @@ export default function Header({ notifications, onBellClick, showNotifications, 
           )}
         </div>
 
-        <button onClick={logout}
-          className="text-xs tracking-widest uppercase px-3 py-1 border transition-colors"
-          style={{ borderColor: 'var(--gold)', color: 'var(--gold)', fontFamily: 'Georgia, serif' }}>
-          Déconnexion
-        </button>
+        <button onClick={logout} style={{ background:'transparent', border:'1px solid var(--bronze-border)', color:'rgba(246,247,249,.8)', fontSize:'.75rem', letterSpacing:'.05em', padding:'6px 14px', borderRadius:'var(--r)', cursor:'pointer', fontFamily:'var(--font-body)' }}>Déconnexion</button>
       </div>
     </header>
   );

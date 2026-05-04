@@ -29,6 +29,7 @@ router.get('/conversations', authMiddleware, (req: AuthRequest, res: Response) =
   const currentUserRole = req.user!.role;
 
   if (currentUserRole === 'client') {
+    // Clients see conseillers
     const contactedStaffIds = new Set<string>();
     messages
       .filter(m => m.fromId === currentUserId || m.toId === currentUserId)
@@ -50,20 +51,26 @@ router.get('/conversations', authMiddleware, (req: AuthRequest, res: Response) =
 
     res.json(clientContacts);
   } else {
-    const allClientIds = new Set<string>(users.filter(u => u.role === 'client').map(u => u.id));
+    // Staff (conseiller / directeur) see: all clients + all other staff members
+    const otherUsers = users.filter(u => u.id !== currentUserId);
 
-    const staffContacts = [...allClientIds]
-      .map(id => {
-        const foundUser = users.find(u => u.id === id);
-        if (!foundUser) return null;
-        const lastMessage = messages
-          .filter(m => (m.fromId === currentUserId && m.toId === id) || (m.fromId === id && m.toId === currentUserId))
-          .slice(-1)[0];
-        return { id: foundUser.id, name: foundUser.name, role: foundUser.role, lastMsg: lastMessage };
-      })
-      .filter(Boolean);
+    const contacts = otherUsers.map(u => {
+      const lastMessage = messages
+        .filter(m => (m.fromId === currentUserId && m.toId === u.id) || (m.fromId === u.id && m.toId === currentUserId))
+        .slice(-1)[0];
+      return { id: u.id, name: u.name, role: u.role, lastMsg: lastMessage };
+    });
 
-    res.json(staffContacts);
+    // Sort: staff first, then clients; alphabetically within groups
+    contacts.sort((a, b) => {
+      const aIsStaff = a.role === 'conseiller' || a.role === 'directeur';
+      const bIsStaff = b.role === 'conseiller' || b.role === 'directeur';
+      if (aIsStaff && !bIsStaff) return -1;
+      if (!aIsStaff && bIsStaff) return 1;
+      return a.name.localeCompare(b.name, 'fr');
+    });
+
+    res.json(contacts);
   }
 });
 
@@ -72,12 +79,10 @@ router.get('/discussion-groups', authMiddleware, requireRole('conseiller', 'dire
   const currentUserId = req.user!.userId;
   const currentUserRole = req.user!.role;
 
-  // Directeur sees all groups; conseiller sees only groups they're in
   const visibleGroups = currentUserRole === 'directeur'
     ? discussionGroups
     : discussionGroups.filter(g => g.memberIds.includes(currentUserId));
 
-  // Enrich with member names
   const enriched = visibleGroups.map(g => ({
     ...g,
     members: g.memberIds.map(id => {

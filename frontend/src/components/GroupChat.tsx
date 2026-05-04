@@ -3,115 +3,183 @@ import { useState, useEffect, useRef } from 'react';
 import { GroupMessage } from '@/types';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { BuildingIcon } from '@/components/Icons';
 
-interface Props {
-  onSend: (content: string) => void;
-  newMessage?: GroupMessage;
-  typingNames?: string[];
+interface GroupChatProps {
+  onSendMessage: (content: string) => void;
+  onStartTyping: () => void;
+  onStopTyping: () => void;
+  latestIncomingMessage?: GroupMessage;
+  currentlyTypingNames?: string[];
 }
 
-const ROLE_BADGE_STYLES: Record<string, { label: string; backgroundColor: string; textColor: string }> = {
-  directeur: { label: 'Directeur', backgroundColor: '#0e1f40', textColor: '#d4a017' },
-  conseiller: { label: 'Conseiller', backgroundColor: '#152d5c', textColor: '#f8f5ef' },
-};
-
-export default function GroupChat({ onSend, newMessage, typingNames = [] }: Props) {
+export default function GroupChat({
+  onSendMessage,
+  onStartTyping,
+  onStopTyping,
+  latestIncomingMessage,
+  currentlyTypingNames = [],
+}: GroupChatProps) {
   const { token, user } = useAuth();
-  const [channelMessages, setChannelMessages] = useState<GroupMessage[]>([]);
-  const [messageInput, setMessageInput] = useState('');
+  const [messageHistory, setMessageHistory] = useState<GroupMessage[]>([]);
+  const [draftMessage, setDraftMessage] = useState('');
   const messagesBottomRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCurrentlyTypingRef = useRef(false);
 
+  // Load message history on mount
   useEffect(() => {
-    apiFetch<GroupMessage[]>('/api/messages/group', token).then(setChannelMessages).catch(() => {});
+    apiFetch<GroupMessage[]>('/api/messages/group', token)
+      .then(setMessageHistory)
+      .catch(() => {});
   }, [token]);
 
+  // Append new incoming messages in real-time
   useEffect(() => {
-    if (!newMessage) return;
-    setChannelMessages(previousMessages => {
-      const alreadyExists = previousMessages.some(m => m.id === newMessage.id);
-      return alreadyExists ? previousMessages : [...previousMessages, newMessage];
-    });
-  }, [newMessage]);
+    if (!latestIncomingMessage) return;
+    setMessageHistory(previous =>
+      previous.some(m => m.id === latestIncomingMessage.id)
+        ? previous
+        : [...previous, latestIncomingMessage]
+    );
+  }, [latestIncomingMessage]);
 
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [channelMessages]);
+  }, [messageHistory, currentlyTypingNames]);
 
-  const handleSend = () => {
-    const trimmedInput = messageInput.trim();
-    if (!trimmedInput) return;
-    onSend(trimmedInput);
-    setMessageInput('');
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDraftMessage(event.target.value);
+    if (!isCurrentlyTypingRef.current) {
+      isCurrentlyTypingRef.current = true;
+      onStartTyping();
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isCurrentlyTypingRef.current = false;
+      onStopTyping();
+    }, 2000);
+  };
+
+  const handleSendMessage = () => {
+    const trimmedContent = draftMessage.trim();
+    if (!trimmedContent) return;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    isCurrentlyTypingRef.current = false;
+    onStopTyping();
+    onSendMessage(trimmedContent);
+    setDraftMessage('');
+  };
+
+  const getRoleDisplayStyle = (role: string) =>
+    role === 'directeur'
+      ? { label: 'Directeur', backgroundColor: 'rgba(181,129,62,.15)', color: 'var(--bronze-dark)' }
+      : { label: 'Conseiller', backgroundColor: 'var(--surface-alt)', color: 'var(--text-2)' };
+
+  const formatTypingIndicatorText = (names: string[]): string => {
+    if (names.length === 1) return `${names[0]} est en train d'écrire un message…`;
+    const allButLast = names.slice(0, -1).join(', ');
+    const last = names[names.length - 1];
+    return `${allButLast} et ${last} écrivent un message…`;
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-5 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
-        <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: 'var(--gold)' }}>
-          <BuildingIcon size={18} style={{ color: 'var(--navy)' }} />
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+
+      {/* Channel header */}
+      <div style={{ padding: '14px 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, var(--slate-900) 0%, var(--slate-700) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="var(--bronze)" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="9" cy="7" r="4" stroke="var(--bronze)" strokeWidth="2"/>
+            <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="var(--bronze)" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
         </div>
         <div>
-          <p className="font-semibold" style={{ color: 'var(--navy)' }}>Canal Interne</p>
-          <p className="text-xs" style={{ color: 'var(--gold)' }}>Conseillers & Directeurs</p>
+          <p style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>Canal Interne</p>
+          {currentlyTypingNames.length > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 3 }}>
+                <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+              </div>
+              <p style={{ fontSize: '0.72rem', color: 'var(--bronze)', fontWeight: 600, fontStyle: 'italic' }}>
+                {formatTypingIndicatorText(currentlyTypingNames)}
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: '0.72rem', color: 'var(--bronze-dark)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Conseillers & Directeur
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: 'var(--cream)' }}>
-        {channelMessages.length === 0 && typingNames.length === 0 && (
-          <div className="py-10 flex flex-col items-center justify-center text-center" style={{ color: 'rgba(14,31,64,0.4)' }}>
-            <BuildingIcon size={32} style={{ color: 'rgba(14,31,64,0.35)' }} />
+      {/* Message list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
+        {messageHistory.length === 0 && currentlyTypingNames.length === 0 && (
+          <div style={{ textAlign: 'center', paddingTop: 60, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Aucun message dans le canal interne
           </div>
         )}
-        {channelMessages.map((groupMessage, messageIndex) => {
-          const isSentByCurrentUser = groupMessage.fromId === user?.id;
-          const roleBadge = ROLE_BADGE_STYLES[groupMessage.fromRole] || ROLE_BADGE_STYLES.conseiller;
-          return (
-            <div key={groupMessage.id || messageIndex} className={`flex ${isSentByCurrentUser ? 'justify-end slide-in-right' : 'justify-start slide-in-left'}`}>
-              <div className="max-w-sm">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {messageHistory.map((message, index) => {
+            const isSentByCurrentUser = message.fromId === user?.id;
+            const roleStyle = getRoleDisplayStyle(message.fromRole);
+            return (
+              <div
+                key={message.id || index}
+                className={isSentByCurrentUser ? 'slide-in-right' : 'slide-in-left'}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: isSentByCurrentUser ? 'flex-end' : 'flex-start' }}
+              >
                 {!isSentByCurrentUser && (
-                  <div className="flex items-center gap-2 mb-1 ml-1">
-                    <span className="text-xs font-semibold" style={{ color: 'var(--navy)' }}>{groupMessage.fromName}</span>
-                    <span className="text-xs px-2 py-0.5 rounded-sm" style={{ background: roleBadge.backgroundColor, color: roleBadge.textColor }}>
-                      {roleBadge.label}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, paddingLeft: 2 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--slate-900)', color: 'var(--bronze)', fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {message.fromName[0]}
+                    </div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>{message.fromName}</span>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, backgroundColor: roleStyle.backgroundColor, color: roleStyle.color }}>
+                      {roleStyle.label}
                     </span>
                   </div>
                 )}
-                <div className="px-4 py-2 text-sm"
-                  style={{
-                    background: isSentByCurrentUser ? 'var(--navy)' : 'white',
-                    color: isSentByCurrentUser ? 'var(--cream)' : 'var(--navy)',
-                    border: isSentByCurrentUser ? 'none' : '1px solid var(--cream-dark)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  }}>
-                  {groupMessage.content}
-                </div>
-                <p className={`text-xs mt-1 ${isSentByCurrentUser ? 'text-right' : ''}`} style={{ color: 'rgba(14,31,64,0.4)' }}>
-                  {new Date(groupMessage.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
+                <div className={isSentByCurrentUser ? 'bubble-me' : 'bubble-other'}>{message.content}</div>
+                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3, paddingLeft: 2, paddingRight: 2 }}>
+                  {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
               </div>
-            </div>
-          );
-        })}
-        {typingNames.length > 0 && (
-          <div className="flex justify-start">
-            <div className="px-4 py-2 text-xs italic" style={{ color: 'var(--gold)', background: 'white', border: '1px solid var(--cream-dark)' }}>
-              {typingNames.join(', ')} {typingNames.length > 1 ? 'écrivent' : 'écrit'}…
-            </div>
+            );
+          })}
+        </div>
+
+        {/* Typing indicator in message area */}
+        {currentlyTypingNames.length > 0 && (
+          <div className="sys-pill typing" style={{ marginTop: 10 }}>
+            <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/>
+            </span>
+            <span>
+              {currentlyTypingNames.length === 1
+                ? <><strong>{currentlyTypingNames[0]}</strong> est en train d&apos;écrire un message…</>
+                : <><strong>{currentlyTypingNames.slice(0, -1).join(', ')}</strong> et <strong>{currentlyTypingNames[currentlyTypingNames.length - 1]}</strong> écrivent un message…</>
+              }
+            </span>
           </div>
         )}
         <div ref={messagesBottomRef} />
       </div>
 
-      <div className="p-4 border-t flex gap-2" style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
+      {/* Message input */}
+      <div style={{ padding: '12px 20px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
         <input
-          className="input-avenir flex-1 text-sm"
+          className="input-avenir"
           placeholder="Message au canal interne…"
-          value={messageInput}
-          onChange={e => setMessageInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()}
+          value={draftMessage}
+          onChange={handleInputChange}
+          onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
         />
-        <button className="btn-navy px-5 text-sm" onClick={handleSend}>Envoyer</button>
+        <button className="btn-dark" onClick={handleSendMessage} style={{ flexShrink: 0 }}>Envoyer</button>
       </div>
     </div>
   );

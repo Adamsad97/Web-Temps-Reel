@@ -3,14 +3,10 @@ import { useState } from 'react';
 import { NewsItem } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
-import { NewsIcon } from '@/components/Icons';
 
-interface Props {
-  news: NewsItem[];
-  onNewsCreated?: (item: NewsItem) => void;
-}
+interface Props { news: NewsItem[]; }
 
-export default function NewsFeed({ news, onNewsCreated }: Props) {
+export default function NewsFeed({ news }: Props) {
   const { user, token } = useAuth();
   const isStaff = user?.role === 'conseiller' || user?.role === 'directeur';
   const [title, setTitle] = useState('');
@@ -21,75 +17,99 @@ export default function NewsFeed({ news, onNewsCreated }: Props) {
 
   const handlePublish = async () => {
     if (!title.trim() || !content.trim()) return;
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
-      const item = await apiFetch<NewsItem>('/api/sse/news', token, {
-        method: 'POST',
-        body: JSON.stringify({ title, content }),
-      });
-      onNewsCreated?.(item);
-      setTitle('');
-      setContent('');
-      setShowForm(false);
+      await apiFetch<NewsItem>('/api/sse/news', token, { method: 'POST', body: JSON.stringify({ title, content }) });
+      setTitle(''); setContent(''); setShowForm(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erreur');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+    <div style={{ height: '100%', overflowY: 'auto', padding: '28px 32px', background: 'var(--bg)' }}>
+      <div style={{ maxWidth: 680, margin: '0 auto' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 28 }}>
           <div>
-            <h2 className="text-2xl font-display" style={{ color: 'var(--navy)' }}>Actualités</h2>
-            <div className="gold-line mt-2 w-24" />
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', fontWeight: 700, color: 'var(--slate-900)', letterSpacing: '-0.01em' }}>
+              Actualités
+            </h2>
+            <div className="gold-line" style={{ width: 48, marginTop: 8 }} />
           </div>
           {isStaff && (
-            <button className="btn-gold text-xs tracking-widest uppercase" onClick={() => setShowForm(!showForm)}>
-              {showForm ? 'Annuler' : '+ Publier'}
+            <button className={showForm ? 'btn-ghost' : 'btn-primary'} onClick={() => setShowForm(v => !v)}>
+              {showForm ? '✕ Annuler' : '+ Publier'}
             </button>
           )}
         </div>
 
+        {/* Publish form */}
         {isStaff && showForm && (
-          <div className="card-avenir p-5 mb-6 fade-in">
-            <p className="text-xs tracking-widest uppercase mb-4" style={{ color: 'var(--gold)' }}>Nouvelle actualité</p>
-            <div className="space-y-3">
+          <div className="card-avenir fade-in" style={{ padding: 24, marginBottom: 24 }}>
+            <p style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--bronze-dark)', marginBottom: 16 }}>
+              Nouvelle actualité
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <input className="input-avenir" placeholder="Titre de l'actualité" value={title} onChange={e => setTitle(e.target.value)} />
-              <textarea className="input-avenir min-h-[100px] resize-none" placeholder="Contenu…" value={content}
-                onChange={e => setContent(e.target.value)} style={{ display: 'block' }} />
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <div className="flex justify-end">
-                <button className="btn-gold text-xs tracking-widest uppercase" onClick={handlePublish} disabled={loading}>
-                  {loading ? 'Publication…' : 'Publier'}
+              <textarea className="input-avenir" placeholder="Contenu…" value={content} onChange={e => setContent(e.target.value)}
+                style={{ minHeight: 110, resize: 'vertical', display: 'block' }} />
+              {error && <p style={{ fontSize: '0.83rem', color: '#b91c1c' }}>{error}</p>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn-primary" onClick={handlePublish} disabled={loading}>
+                  {loading ? 'Publication…' : 'Publier l\'actualité'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
+        {/* Empty state */}
         {news.length === 0 && (
-          <div className="py-10 flex items-center justify-center" aria-hidden="true">
-            <NewsIcon size={32} style={{ color: 'rgba(14,31,64,0.25)' }} />
+          <div style={{ textAlign: 'center', paddingTop: 80, color: 'var(--text-muted)' }}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" style={{ margin: '0 auto 16px', display: 'block', opacity: 0.3 }}>
+              <path d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v8a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M14 4v4h4M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            <p style={{ fontSize: '0.9rem' }}>Aucune actualité pour le moment</p>
           </div>
         )}
-        <div className="space-y-4">
-          {news.map((newsItem, itemIndex) => (
-            <article key={newsItem.id || itemIndex} className="card-avenir p-5 fade-in hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="text-lg font-display font-semibold" style={{ color: 'var(--navy)' }}>{newsItem.title}</h3>
-                <span className="text-xs ml-4 flex-shrink-0" style={{ color: 'var(--gold)' }}>
-                  {new Date(newsItem.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+
+        {/* Articles */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {news.map((item, i) => (
+            <article key={item.id || i} className="card-avenir fade-in" style={{ padding: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', fontWeight: 700, color: 'var(--slate-900)', lineHeight: 1.35, flex: 1, paddingRight: 16 }}>
+                  {item.title}
+                </h3>
+                <span style={{
+                  fontSize: '0.72rem', fontWeight: 600, color: 'var(--bronze-dark)',
+                  background: 'var(--bronze-subtle)', borderRadius: 99, padding: '3px 10px', flexShrink: 0,
+                  border: '1px solid rgba(201,168,76,0.2)',
+                }}>
+                  {new Date(item.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
                 </span>
               </div>
-              <div className="gold-line mb-3" />
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--navy)', opacity: 0.85 }}>{newsItem.content}</p>
-              <p className="text-xs mt-3" style={{ color: 'var(--gold)' }}>
-                Publié par {newsItem.authorName}
+              <div className="gold-line" style={{ marginBottom: 12 }} />
+              <p style={{ fontSize: '0.9rem', lineHeight: 1.65, color: 'rgba(13,30,60,0.82)' }}>
+                {item.content}
               </p>
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: '50%',
+                  background: 'linear-gradient(135deg, var(--bronze-subtle), var(--border))',
+                  border: '1px solid rgba(201,168,76,0.3)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '0.72rem', fontWeight: 700, color: 'var(--bronze-dark)',
+                }}>
+                  {item.authorName[0]}
+                </div>
+                <span style={{ fontSize: '0.78rem', color: 'var(--bronze-dark)', fontWeight: 500 }}>
+                  {item.authorName}
+                </span>
+              </div>
             </article>
           ))}
         </div>
