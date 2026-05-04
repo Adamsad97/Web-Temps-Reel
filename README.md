@@ -8,8 +8,8 @@
 
 ```bash
 # 1. Cloner le projet
-git clone <votre-repo>
-cd avenir-bank
+git clone https://github.com/Adamsad97/Web-Temps-Reel.git
+cd Web-Temps-Reel
 
 # 2. Lancer avec Docker Compose
 docker-compose up --build
@@ -27,7 +27,7 @@ docker compose down
 
 ---
 
-## 🧪 Comptes de test (Fixtures)
+## Comptes de test (Fixtures)
 
 Les fixtures sont créées automatiquement au démarrage. Aucune action supplémentaire requise.
 
@@ -41,4 +41,3 @@ Des comptes supplémentaires sont également disponibles :
 
 - Conseiller 2 : `conseiller2@avenir.fr` / `pass`
 - Client 2 : `marc@avenir.fr` / `pass`
-# Web-Temps-Reel

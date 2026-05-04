@@ -1,9 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { Message, Contact } from '@/types';
-import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { MessageIcon } from '@/components/Icons';
+import { apiFetch } from '@/lib/api';
 
 interface Props {
   contact: Contact;
@@ -14,124 +13,120 @@ interface Props {
   typingFrom?: string;
 }
 
-const ROLE_TEXT_COLORS: Record<string, string> = {
-  directeur: '#0e1f40',
-  conseiller: '#152d5c',
-  client: '#b8860b',
-};
-
-const TYPING_TIMEOUT_MS = 1500;
-
 export default function PrivateChat({ contact, onSend, onTyping, onStopTyping, newMessage, typingFrom }: Props) {
-  const { token, user } = useAuth();
-  const [conversationMessages, setConversationMessages] = useState<(Message & { fromName?: string; fromRole?: string })[]>([]);
-  const [messageInput, setMessageInput] = useState('');
-  const messagesBottomRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { user, token } = useAuth();
+  const [messages, setMessages] = useState<(Message & { fromName?: string; fromRole?: string })[]>([]);
+  const [input, setInput] = useState('');
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    apiFetch<(Message & { fromName?: string; fromRole?: string })[]>(
-      `/api/messages/private/${contact.id}`, token
-    ).then(setConversationMessages).catch(() => {});
+    apiFetch<(Message & { fromName?: string; fromRole?: string })[]>(`/api/messages/private/${contact.id}`, token)
+      .then(setMessages).catch(() => {});
   }, [contact.id, token]);
 
   useEffect(() => {
     if (!newMessage) return;
-    const isPartOfThisConversation = newMessage.fromId === contact.id || newMessage.toId === contact.id;
-    if (!isPartOfThisConversation) return;
-
-    setConversationMessages(previousMessages => {
-      const alreadyExists = previousMessages.some(m => m.id === newMessage.id);
-      return alreadyExists ? previousMessages : [...previousMessages, newMessage];
-    });
-  }, [newMessage, contact.id]);
+    const isRelevant =
+      (newMessage.fromId === contact.id && newMessage.toId === user?.id) ||
+      (newMessage.fromId === user?.id && newMessage.toId === contact.id);
+    if (!isRelevant) return;
+    setMessages(prev => prev.some(m => m.id === newMessage.id) ? prev : [...prev, newMessage]);
+  }, [newMessage, contact.id, user?.id]);
 
   useEffect(() => {
-    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [conversationMessages]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const handleInputChange = (newValue: string) => {
-    setMessageInput(newValue);
-    onTyping(contact.id);
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => onStopTyping(contact.id), TYPING_TIMEOUT_MS);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value);
+    if (!isTypingRef.current) { isTypingRef.current = true; onTyping(contact.id); }
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => { isTypingRef.current = false; onStopTyping(contact.id); }, 2000);
   };
 
   const handleSend = () => {
-    const trimmedInput = messageInput.trim();
-    if (!trimmedInput) return;
-    onSend(contact.id, trimmedInput);
-    setMessageInput('');
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    onStopTyping(contact.id);
+    const c = input.trim(); if (!c) return;
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    isTypingRef.current = false; onStopTyping(contact.id);
+    onSend(contact.id, c); setInput('');
   };
 
+  const roleLabel = (role?: string) => role === 'directeur' ? 'Directeur' : role === 'conseiller' ? 'Conseiller' : 'Client';
+  const roleColor = (role?: string) => role === 'directeur' ? 'var(--bronze-dark)' : role === 'conseiller' ? 'var(--navy-mid)' : 'var(--text-muted)';
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-5 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
-        <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
-          style={{ background: 'var(--navy)', color: 'var(--gold)' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      {/* Header */}
+      <div style={{
+        padding: '14px 20px', background: 'var(--white)',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 12,
+        boxShadow: 'var(--shadow-sm)',
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%',
+          background: 'linear-gradient(135deg, var(--slate-900) 0%, var(--navy-mid) 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '1rem', fontWeight: 700, color: 'var(--bronze)', flexShrink: 0,
+        }}>
           {contact.name[0]}
         </div>
         <div>
-          <p className="font-semibold" style={{ color: 'var(--navy)' }}>{contact.name}</p>
-          <p className="text-xs capitalize" style={{ color: 'var(--gold)' }}>{contact.role}</p>
+          <p style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--slate-900)', lineHeight: 1.2 }}>{contact.name}</p>
+          <p style={{ fontSize: '0.72rem', color: roleColor(contact.role), fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {roleLabel(contact.role)}
+          </p>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: 'var(--cream)' }}>
-        {conversationMessages.length === 0 && !typingFrom && (
-          <div className="py-10 flex flex-col items-center justify-center text-center" style={{ color: 'rgba(14,31,64,0.4)' }}>
-            <MessageIcon size={32} style={{ marginBottom: 12 }} />
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
+        {messages.length === 0 && (
+          <div style={{ textAlign: 'center', paddingTop: 60, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Commencez la conversation
           </div>
         )}
-        {conversationMessages.map((message, messageIndex) => {
-          const isSentByCurrentUser = message.fromId === user?.id;
-          const senderColor = ROLE_TEXT_COLORS[message.fromRole || 'client'] || 'var(--gold)';
-          return (
-            <div key={message.id || messageIndex} className={`flex ${isSentByCurrentUser ? 'justify-end slide-in-right' : 'justify-start slide-in-left'}`}>
-              <div className="max-w-xs lg:max-w-sm">
-                {!isSentByCurrentUser && (
-                  <p className="text-xs mb-1 ml-1" style={{ color: senderColor }}>
-                    {message.fromName}
-                  </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {messages.map((msg, i) => {
+            const isMine = msg.fromId === user?.id;
+            return (
+              <div key={msg.id || i} className={isMine ? 'slide-in-right' : 'slide-in-left'}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
+                {!isMine && (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 3, paddingLeft: 4 }}>
+                    {msg.fromName || contact.name}
+                  </span>
                 )}
-                <div className="px-4 py-2 text-sm"
-                  style={{
-                    background: isSentByCurrentUser ? 'var(--navy)' : 'white',
-                    color: isSentByCurrentUser ? 'var(--cream)' : 'var(--navy)',
-                    border: isSentByCurrentUser ? 'none' : '1px solid var(--cream-dark)',
-                    borderRadius: '2px',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  }}>
-                  {message.content}
-                </div>
-                <p className={`text-xs mt-1 ${isSentByCurrentUser ? 'text-right' : ''}`} style={{ color: 'rgba(14,31,64,0.4)' }}>
-                  {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
+                <div className={isMine ? 'bubble-me' : 'bubble-other'}>{msg.content}</div>
+                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3, paddingLeft: 4, paddingRight: 4 }}>
+                  {new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
         {typingFrom === contact.id && (
-          <div className="flex justify-start">
-            <div className="px-4 py-2 text-xs italic" style={{ color: 'var(--gold)', background: 'white', border: '1px solid var(--cream-dark)' }}>
-              {contact.name} est en train d&apos;écrire…
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, paddingLeft: 4 }}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
             </div>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              {contact.name} est en train d'écrire…
+            </span>
           </div>
         )}
-        <div ref={messagesBottomRef} />
+        <div ref={bottomRef} />
       </div>
 
-      <div className="p-4 border-t flex gap-2" style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
-        <input
-          className="input-avenir flex-1 text-sm"
-          placeholder="Votre message…"
-          value={messageInput}
-          onChange={e => handleInputChange(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()}
-        />
-        <button className="btn-navy px-5 text-sm" onClick={handleSend}>Envoyer</button>
+      {/* Input */}
+      <div style={{ padding: '12px 20px', background: 'var(--white)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
+        <input className="input-avenir" placeholder={`Message à ${contact.name}…`}
+          value={input} onChange={handleInputChange} onKeyDown={e => e.key === 'Enter' && handleSend()} />
+        <button className="btn-dark" onClick={handleSend} style={{ flexShrink: 0, padding: '0.55rem 1.1rem' }}>
+          Envoyer
+        </button>
       </div>
     </div>
   );

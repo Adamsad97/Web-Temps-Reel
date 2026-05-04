@@ -3,114 +3,159 @@ import { useState, useEffect, useRef } from 'react';
 import { DiscussionGroup, DiscussionGroupMessage } from '@/types';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { BuildingIcon } from '@/components/Icons';
 
-interface Props {
+interface DiscussionGroupsProps {
   groups: DiscussionGroup[];
-  onGroupsChange: (updater: DiscussionGroup[] | ((prev: DiscussionGroup[]) => DiscussionGroup[])) => void;
-  onSend: (type: string, payload: Record<string, unknown>) => void;
-  latestEvent?: { type: string; payload: Record<string, unknown> };
+  onGroupsChange: (updater: DiscussionGroup[] | ((previous: DiscussionGroup[]) => DiscussionGroup[])) => void;
+  onSend: (eventType: string, payload: Record<string, unknown>) => void;
+  latestRealtimeEvent?: { type: string; payload: Record<string, unknown> };
 }
 
-const statusColors: Record<string, string> = {
-  connected: '#22c55e',
-  disconnected: '#94a3b8',
-};
+interface SystemEventItem {
+  id: string;
+  eventType: 'joined' | 'left' | 'connected' | 'disconnected';
+  actorUserId: string;
+  actorUserName: string;
+  createdAt: string;
+}
 
-function MembersAvatars({ members, connectedIds }: { members: { id: string; name: string }[]; connectedIds: string[] }) {
+type ChatItem =
+  | { kind: 'message'; message: DiscussionGroupMessage }
+  | { kind: 'system'; systemEvent: SystemEventItem };
+
+/** Returns the CSS class for the system event pill based on event type. */
+function getSystemPillClassName(eventType: string): string {
+  if (eventType === 'joined' || eventType === 'connected') return 'sys-pill join';
+  if (eventType === 'left') return 'sys-pill leave';
+  return 'sys-pill';
+}
+
+/**
+ * Returns a human-readable label for a system event.
+ * Personalises the message when the current user is the actor:
+ *   - Actor sees: "Vous avez rejoint la discussion"
+ *   - Others see: "Adama a rejoint la discussion"
+ */
+function buildSystemEventLabel(
+  eventType: string,
+  actorUserName: string,
+  actorUserId: string,
+  currentUserId: string
+): string {
+  const isCurrentUserTheActor = actorUserId === currentUserId;
+
+  if (isCurrentUserTheActor) {
+    switch (eventType) {
+      case 'joined':      return '✦ Vous avez rejoint la discussion';
+      case 'left':        return '✦ Vous avez quitté la discussion';
+      case 'connected':   return '● Vous vous êtes connecté au groupe';
+      case 'disconnected':return '○ Vous vous êtes déconnecté du groupe';
+      default:            return '● Action effectuée';
+    }
+  } else {
+    switch (eventType) {
+      case 'joined':      return `✦ ${actorUserName} vient de rejoindre la discussion`;
+      case 'left':        return `✦ ${actorUserName} a quitté la discussion`;
+      case 'connected':   return `● ${actorUserName} s'est connecté au groupe`;
+      case 'disconnected':return `○ ${actorUserName} s'est déconnecté du groupe`;
+      default:            return `● ${actorUserName}`;
+    }
+  }
+}
+
+function MemberAvatarList({
+  members,
+  connectedMemberIds,
+}: {
+  members: { id: string; name: string }[];
+  connectedMemberIds: string[];
+}) {
   return (
-    <div className="flex -space-x-2">
-      {members.slice(0, 5).map(m => (
-        <div key={m.id} className="relative w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2"
-          style={{ background: 'rgba(184,134,11,0.2)', color: 'var(--navy)', borderColor: 'var(--navy)' }}
-          title={m.name}>
-          {m.name[0]}
-          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
-            style={{ background: connectedIds.includes(m.id) ? statusColors.connected : statusColors.disconnected }} />
+    <div style={{ display: 'flex' }}>
+      {members.slice(0, 5).map(member => (
+        <div
+          key={member.id}
+          title={member.name}
+          style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bronze-subtle)', border: '2px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.72rem', fontWeight: 700, color: 'var(--slate-800)', position: 'relative', marginLeft: '-6px' }}
+        >
+          {member.name[0]}
+          <span style={{ position: 'absolute', bottom: -2, right: -2, width: 9, height: 9, borderRadius: '50%', border: '1.5px solid white', background: connectedMemberIds.includes(member.id) ? 'var(--success)' : 'var(--slate-200)' }} />
         </div>
       ))}
-      {members.length > 5 && (
-        <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2"
-          style={{ background: 'rgba(14,31,64,0.1)', color: 'var(--navy)', borderColor: 'var(--navy)' }}>
-          +{members.length - 5}
-        </div>
-      )}
     </div>
   );
 }
 
 function CreateGroupModal({
-  conseillers,
+  availableConseillers,
   onClose,
   onCreate,
 }: {
-  conseillers: { id: string; name: string }[];
+  availableConseillers: { id: string; name: string }[];
   onClose: () => void;
-  onCreate: (name: string, memberIds: string[]) => void;
+  onCreate: (groupName: string, invitedMemberIds: string[]) => void;
 }) {
-  const [name, setName] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
+  const [groupName, setGroupName] = useState('');
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
-  const toggle = (id: string) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const toggleMemberSelection = (memberId: string) =>
+    setSelectedMemberIds(previous =>
+      previous.includes(memberId)
+        ? previous.filter(id => id !== memberId)
+        : [...previous, memberId]
+    );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-lg shadow-2xl overflow-hidden"
-        style={{ background: 'var(--cream)', border: '1px solid rgba(184,134,11,0.3)' }}>
-        <div className="px-6 py-4 border-b flex items-center justify-between"
-          style={{ borderColor: 'rgba(184,134,11,0.2)', background: 'var(--navy)' }}>
-          <h2 className="text-base font-semibold" style={{ color: 'var(--gold)', fontFamily: 'Georgia, serif' }}>
-            Créer un groupe de discussion
-          </h2>
-          <button onClick={onClose} className="text-sm" style={{ color: 'rgba(248,245,239,0.5)' }}>✕</button>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)' }}>
+      <div className="fade-in" style={{ width: '100%', maxWidth: 420, background: 'var(--surface)', borderRadius: 'var(--r-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)' }}>
+        <div style={{ padding: '16px 22px', background: 'var(--slate-900)', borderBottom: '2px solid var(--bronze)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontWeight: 700, color: 'var(--bronze)', fontSize: '.95rem' }}>Créer un groupe de discussion</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(246,247,249,.5)', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
         </div>
-        <div className="p-6 space-y-4">
+        <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label className="block text-xs font-semibold mb-1 uppercase tracking-wider" style={{ color: 'var(--navy)' }}>
+            <label style={{ display: 'block', fontSize: '.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-2)', marginBottom: 6 }}>
               Nom du groupe
             </label>
             <input
-              className="input-avenir w-full text-sm"
+              className="input-avenir"
               placeholder="Ex. Réunion Crédit Immobilier"
-              value={name}
-              onChange={e => setName(e.target.value)}
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--navy)' }}>
+            <label style={{ display: 'block', fontSize: '.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-2)', marginBottom: 8 }}>
               Conseillers invités
             </label>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {conseillers.map(c => (
-                <label key={c.id} className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer transition-colors"
-                  style={{ background: selected.includes(c.id) ? 'rgba(184,134,11,0.12)' : 'rgba(14,31,64,0.04)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+              {availableConseillers.map(conseiller => (
+                <label
+                  key={conseiller.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 'var(--r)', cursor: 'pointer', background: selectedMemberIds.includes(conseiller.id) ? 'var(--bronze-subtle)' : 'var(--surface-alt)', border: `1px solid ${selectedMemberIds.includes(conseiller.id) ? 'var(--bronze-border)' : 'var(--border)'}` }}
+                >
                   <input
                     type="checkbox"
-                    checked={selected.includes(c.id)}
-                    onChange={() => toggle(c.id)}
-                    className="accent-[var(--gold)]"
+                    checked={selectedMemberIds.includes(conseiller.id)}
+                    onChange={() => toggleMemberSelection(conseiller.id)}
+                    style={{ accentColor: 'var(--bronze)' }}
                   />
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                    style={{ background: 'rgba(184,134,11,0.2)', color: 'var(--navy)' }}>
-                    {c.name[0]}
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bronze-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.78rem', fontWeight: 700, color: 'var(--bronze-dark)' }}>
+                    {conseiller.name[0]}
                   </div>
-                  <span className="text-sm" style={{ color: 'var(--navy)' }}>{c.name}</span>
+                  <span style={{ fontSize: '.88rem', color: 'var(--text)' }}>{conseiller.name}</span>
                 </label>
               ))}
             </div>
           </div>
         </div>
-        <div className="px-6 py-4 border-t flex justify-end gap-3"
-          style={{ borderColor: 'rgba(184,134,11,0.2)' }}>
-          <button className="px-4 py-2 text-sm rounded" onClick={onClose}
-            style={{ color: 'var(--navy)', background: 'rgba(14,31,64,0.08)' }}>
-            Annuler
-          </button>
-          <button className="btn-navy px-5 text-sm"
-            disabled={!name.trim() || selected.length === 0}
-            onClick={() => onCreate(name.trim(), selected)}>
+        <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn-ghost" onClick={onClose}>Annuler</button>
+          <button
+            className="btn-dark"
+            disabled={!groupName.trim() || selectedMemberIds.length === 0}
+            onClick={() => onCreate(groupName.trim(), selectedMemberIds)}
+          >
             Créer le groupe
           </button>
         </div>
@@ -119,7 +164,7 @@ function CreateGroupModal({
   );
 }
 
-function GroupDetail({
+function GroupDiscussionDetail({
   group,
   currentUserId,
   isDirecteur,
@@ -127,10 +172,11 @@ function GroupDetail({
   onDisconnect,
   onLeave,
   onSendMessage,
-  onTyping,
+  onStartTyping,
   onStopTyping,
-  newMessage,
-  typingNames,
+  latestIncomingMessage,
+  currentlyTypingNames,
+  latestSystemEvent,
 }: {
   group: DiscussionGroup;
   currentUserId: string;
@@ -139,98 +185,126 @@ function GroupDetail({
   onDisconnect: () => void;
   onLeave: () => void;
   onSendMessage: (content: string) => void;
-  onTyping: () => void;
+  onStartTyping: () => void;
   onStopTyping: () => void;
-  newMessage?: DiscussionGroupMessage;
-  typingNames: string[];
+  latestIncomingMessage?: DiscussionGroupMessage;
+  currentlyTypingNames: string[];
+  latestSystemEvent?: SystemEventItem;
 }) {
   const { token } = useAuth();
-  const [messages, setMessages] = useState<DiscussionGroupMessage[]>([]);
-  const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTypingRef = useRef(false);
+  const [chatItems, setChatItems] = useState<ChatItem[]>([]);
+  const [draftMessage, setDraftMessage] = useState('');
+  const messagesBottomRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCurrentlyTypingRef = useRef(false);
 
-  const isConnected = group.connectedMemberIds.includes(currentUserId);
-  const isMember = group.memberIds.includes(currentUserId) || isDirecteur;
+  const isConnectedToGroup = group.connectedMemberIds.includes(currentUserId);
+  const isGroupMember = group.memberIds.includes(currentUserId) || isDirecteur;
 
+  // Load message history
   useEffect(() => {
     apiFetch<DiscussionGroupMessage[]>(`/api/messages/discussion-groups/${group.id}/messages`, token)
-      .then(setMessages).catch(() => {});
+      .then(messages => setChatItems(messages.map(m => ({ kind: 'message' as const, message: m }))))
+      .catch(() => {});
   }, [group.id, token]);
 
+  // Append new real-time messages
   useEffect(() => {
-    if (!newMessage || newMessage.groupId !== group.id) return;
-    setMessages(prev => prev.some(m => m.id === newMessage.id) ? prev : [...prev, newMessage]);
-  }, [newMessage, group.id]);
+    if (!latestIncomingMessage || latestIncomingMessage.groupId !== group.id) return;
+    setChatItems(previous =>
+      previous.some(item => item.kind === 'message' && item.message.id === latestIncomingMessage.id)
+        ? previous
+        : [...previous, { kind: 'message', message: latestIncomingMessage }]
+    );
+  }, [latestIncomingMessage, group.id]);
+
+  // Append system event messages (join/leave/connect/disconnect)
+  useEffect(() => {
+    if (!latestSystemEvent) return;
+    setChatItems(previous => [...previous, { kind: 'system', systemEvent: latestSystemEvent }]);
+  }, [latestSystemEvent]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatItems, currentlyTypingNames]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInput(e.target.value);
-    if (!isTypingRef.current) {
-      isTypingRef.current = true;
-      onTyping();
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDraftMessage(event.target.value);
+    if (!isCurrentlyTypingRef.current) {
+      isCurrentlyTypingRef.current = true;
+      onStartTyping();
     }
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => {
-      isTypingRef.current = false;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isCurrentlyTypingRef.current = false;
       onStopTyping();
     }, 2000);
   };
 
-  const handleSend = () => {
-    const content = input.trim();
-    if (!content) return;
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    isTypingRef.current = false;
+  const handleSendMessage = () => {
+    const trimmedContent = draftMessage.trim();
+    if (!trimmedContent) return;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    isCurrentlyTypingRef.current = false;
     onStopTyping();
-    onSendMessage(content);
-    setInput('');
+    onSendMessage(trimmedContent);
+    setDraftMessage('');
   };
 
-  const connectedCount = group.connectedMemberIds.length;
-  const allMembers = group.members || [];
+  const allGroupMembers = group.members || [];
+  const connectedMemberCount = group.connectedMemberIds.length;
+
+  const formatTypingText = (names: string[]) =>
+    names.length === 1
+      ? `${names[0]} est en train d'écrire un message…`
+      : `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]} écrivent un message…`;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-5 py-3 border-b flex items-center justify-between"
-        style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: 'var(--gold)' }}>
-            <BuildingIcon size={16} style={{ color: 'var(--navy)' }} />
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Group header */}
+      <div className="group-detail-header" style={{ padding: '12px 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: 'var(--shadow-xs)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,var(--slate-800) 0%,var(--slate-700) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="var(--bronze)" strokeWidth="2" strokeLinecap="round"/>
+              <circle cx="9" cy="7" r="4" stroke="var(--bronze)" strokeWidth="2"/>
+              <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="var(--bronze)" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
           </div>
           <div>
-            <p className="font-semibold text-sm" style={{ color: 'var(--navy)' }}>{group.name}</p>
-            <p className="text-xs" style={{ color: connectedCount > 0 ? '#22c55e' : 'rgba(14,31,64,0.4)' }}>
-              {connectedCount} connecté{connectedCount > 1 ? 's' : ''} · {allMembers.length} membre{allMembers.length > 1 ? 's' : ''}
-            </p>
+            <p style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--text)' }}>{group.name}</p>
+            {currentlyTypingNames.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 3 }}>
+                  <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                  <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                  <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                </div>
+                <p style={{ fontSize: '.72rem', color: 'var(--bronze)', fontWeight: 600, fontStyle: 'italic' }}>
+                  {formatTypingText(currentlyTypingNames)}
+                </p>
+              </div>
+            ) : (
+              <p style={{ fontSize: '.72rem', color: connectedMemberCount > 0 ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>
+                {connectedMemberCount} connecté{connectedMemberCount > 1 ? 's' : ''} · {allGroupMembers.length} membre{allGroupMembers.length > 1 ? 's' : ''}
+              </p>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <MembersAvatars members={allMembers} connectedIds={group.connectedMemberIds} />
-          {!isDirecteur && isMember && (
-            <div className="flex gap-2 ml-2">
-              {isConnected ? (
-                <button onClick={onDisconnect}
-                  className="text-xs px-3 py-1.5 rounded font-medium"
-                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <MemberAvatarList members={allGroupMembers} connectedMemberIds={group.connectedMemberIds} />
+          {!isDirecteur && isGroupMember && (
+            <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
+              {isConnectedToGroup ? (
+                <button onClick={onDisconnect} style={{ fontSize: '.75rem', padding: '5px 12px', borderRadius: 'var(--r)', background: 'rgba(155,53,53,.08)', color: 'var(--danger)', border: '1px solid rgba(155,53,53,.25)', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600 }}>
                   Se déconnecter
                 </button>
               ) : (
-                <button onClick={onConnect}
-                  className="text-xs px-3 py-1.5 rounded font-medium"
-                  style={{ background: 'rgba(34,197,94,0.1)', color: '#16a34a', border: '1px solid rgba(34,197,94,0.3)' }}>
+                <button onClick={onConnect} style={{ fontSize: '.75rem', padding: '5px 12px', borderRadius: 'var(--r)', background: 'rgba(58,125,90,.08)', color: 'var(--success)', border: '1px solid rgba(58,125,90,.25)', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600 }}>
                   Se connecter
                 </button>
               )}
-              <button onClick={onLeave}
-                className="text-xs px-3 py-1.5 rounded font-medium"
-                style={{ background: 'rgba(14,31,64,0.06)', color: 'var(--navy)', border: '1px solid rgba(14,31,64,0.15)' }}>
+              <button onClick={onLeave} style={{ fontSize: '.75rem', padding: '5px 12px', borderRadius: 'var(--r)', background: 'var(--surface-alt)', color: 'var(--text-2)', border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600 }}>
                 Quitter
               </button>
             </div>
@@ -238,256 +312,279 @@ function GroupDetail({
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ background: 'var(--cream)' }}>
-        {messages.length === 0 && (
-          <div className="py-10 text-center text-sm" style={{ color: 'rgba(14,31,64,0.35)' }}>
+      {/* Chat messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 8px', background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {chatItems.length === 0 && (
+          <div style={{ textAlign: 'center', paddingTop: 60, color: 'var(--text-muted)', fontSize: '.85rem' }}>
             Aucun message dans ce groupe
           </div>
         )}
-        {messages.map((msg, i) => {
-          const isMine = msg.fromId === currentUserId;
-          return (
-            <div key={msg.id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-              <div className="max-w-sm">
-                {!isMine && (
-                  <div className="flex items-center gap-2 mb-1 ml-1">
-                    <span className="text-xs font-semibold" style={{ color: 'var(--navy)' }}>{msg.fromName}</span>
-                    <span className="text-xs px-1.5 py-0.5 rounded-sm"
-                      style={{ background: msg.fromRole === 'directeur' ? '#0e1f40' : '#152d5c', color: msg.fromRole === 'directeur' ? '#d4a017' : '#f8f5ef' }}>
-                      {msg.fromRole === 'directeur' ? 'Directeur' : 'Conseiller'}
-                    </span>
-                  </div>
+
+        {chatItems.map((item, index) => {
+          if (item.kind === 'system') {
+            const { systemEvent } = item;
+            return (
+              <div
+                key={`system-${systemEvent.id}-${index}`}
+                className={getSystemPillClassName(systemEvent.eventType)}
+              >
+                {buildSystemEventLabel(
+                  systemEvent.eventType,
+                  systemEvent.actorUserName,
+                  systemEvent.actorUserId,
+                  currentUserId
                 )}
-                <div className="px-4 py-2 text-sm"
-                  style={{
-                    background: isMine ? 'var(--navy)' : 'white',
-                    color: isMine ? 'var(--cream)' : 'var(--navy)',
-                    border: isMine ? 'none' : '1px solid var(--cream-dark)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  }}>
-                  {msg.content}
-                </div>
-                <p className={`text-xs mt-1 ${isMine ? 'text-right' : ''}`} style={{ color: 'rgba(14,31,64,0.4)' }}>
-                  {new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
               </div>
+            );
+          }
+
+          const { message } = item;
+          const isSentByCurrentUser = message.fromId === currentUserId;
+          return (
+            <div
+              key={message.id || index}
+              className={isSentByCurrentUser ? 'slide-in-right' : 'slide-in-left'}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: isSentByCurrentUser ? 'flex-end' : 'flex-start' }}
+            >
+              {!isSentByCurrentUser && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, paddingLeft: 2 }}>
+                  <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--slate-800)', color: 'var(--bronze)', fontSize: '.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {message.fromName[0]}
+                  </div>
+                  <span style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--text)' }}>{message.fromName}</span>
+                  <span style={{ fontSize: '.68rem', fontWeight: 700, padding: '2px 7px', borderRadius: 99, background: message.fromRole === 'directeur' ? 'rgba(181,129,62,.15)' : 'var(--surface-alt)', color: message.fromRole === 'directeur' ? 'var(--bronze-dark)' : 'var(--text-2)' }}>
+                    {message.fromRole === 'directeur' ? 'Directeur' : 'Conseiller'}
+                  </span>
+                </div>
+              )}
+              <div className={isSentByCurrentUser ? 'bubble-me' : 'bubble-other'}>{message.content}</div>
+              <span style={{ fontSize: '.68rem', color: 'var(--text-muted)', marginTop: 2, padding: '0 3px' }}>
+                {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
           );
         })}
-        {typingNames.length > 0 && (
-          <div className="flex justify-start">
-            <div className="flex items-center gap-2 px-4 py-2 text-xs italic rounded"
-              style={{ background: 'white', border: '1px solid var(--cream-dark)', color: 'var(--gold)' }}>
-              <span className="flex gap-0.5">
-                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--gold)', animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--gold)', animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--gold)', animationDelay: '300ms' }} />
-              </span>
-              {typingNames.length === 1
-                ? `${typingNames[0]} est en train d'écrire un message…`
-                : `${typingNames.join(', ')} écrivent un message…`}
-            </div>
+
+        {/* Live typing indicator in message area */}
+        {currentlyTypingNames.length > 0 && (
+          <div className="sys-pill typing" style={{ marginTop: 4 }}>
+            <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/>
+            </span>
+            <span>
+              {currentlyTypingNames.length === 1
+                ? <><strong>{currentlyTypingNames[0]}</strong> est en train d&apos;écrire un message…</>
+                : <><strong>{currentlyTypingNames.slice(0, -1).join(', ')}</strong> et <strong>{currentlyTypingNames[currentlyTypingNames.length - 1]}</strong> écrivent un message…</>
+              }
+            </span>
           </div>
         )}
-        <div ref={bottomRef} />
+        <div ref={messagesBottomRef} />
       </div>
 
-      {/* Input */}
-      {(isConnected || isDirecteur) ? (
-        <div className="p-4 border-t flex gap-2" style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
+      {/* Message input */}
+      {(isConnectedToGroup || isDirecteur) ? (
+        <div style={{ padding: '12px 20px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
           <input
-            className="input-avenir flex-1 text-sm"
+            className="input-avenir"
             placeholder="Message dans ce groupe…"
-            value={input}
+            value={draftMessage}
             onChange={handleInputChange}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
           />
-          <button className="btn-navy px-5 text-sm" onClick={handleSend}>Envoyer</button>
+          <button className="btn-dark" onClick={handleSendMessage} style={{ flexShrink: 0 }}>Envoyer</button>
         </div>
       ) : (
-        <div className="p-4 border-t text-center text-sm" style={{ borderColor: 'var(--cream-dark)', background: 'white', color: 'rgba(14,31,64,0.4)' }}>
-          {isMember ? 'Connectez-vous pour envoyer des messages' : 'Rejoignez le groupe pour participer'}
+        <div style={{ padding: '12px 20px', background: 'var(--surface)', borderTop: '1px solid var(--border)', textAlign: 'center', fontSize: '.85rem', color: 'var(--text-muted)' }}>
+          {isGroupMember ? 'Connectez-vous pour envoyer des messages' : 'Rejoignez le groupe pour participer'}
         </div>
       )}
     </div>
   );
 }
 
-export default function DiscussionGroups({ groups, onGroupsChange, onSend, latestEvent }: Props) {
+export default function DiscussionGroups({
+  groups,
+  onGroupsChange,
+  onSend,
+  latestRealtimeEvent,
+}: DiscussionGroupsProps) {
   const { token, user } = useAuth();
   const isDirecteur = user?.role === 'directeur';
+  const currentUserId = user?.id ?? '';
+
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [conseillers, setConseillers] = useState<{ id: string; name: string }[]>([]);
-  const [latestDGMessage, setLatestDGMessage] = useState<DiscussionGroupMessage | undefined>();
-  // typingNames: map of groupId -> list of names currently typing
-  const [groupTypingNames, setGroupTypingNames] = useState<Record<string, string[]>>({});
-  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [availableConseillers, setAvailableConseillers] = useState<{ id: string; name: string }[]>([]);
+  const [latestIncomingGroupMessage, setLatestIncomingGroupMessage] = useState<DiscussionGroupMessage | undefined>();
+  const [typingNamesByGroupId, setTypingNamesByGroupId] = useState<Record<string, string[]>>({});
+  const [latestSystemEventByGroupId, setLatestSystemEventByGroupId] = useState<Record<string, SystemEventItem | undefined>>({});
+  const typingTimeoutsByKey = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Load groups
+  // Load group list on mount
   useEffect(() => {
     apiFetch<DiscussionGroup[]>('/api/messages/discussion-groups', token)
-      .then(data => onGroupsChange(data)).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .then(groupList => onGroupsChange(groupList))
+      .catch(() => {});
   }, [token]);
 
-  // Load conseillers for directeur
+  // Load available conseillers for group creation (directeur only)
   useEffect(() => {
     if (!isDirecteur) return;
     apiFetch<{ id: string; name: string }[]>('/api/messages/discussion-groups/conseillers', token)
-      .then(setConseillers).catch(() => {});
+      .then(setAvailableConseillers)
+      .catch(() => {});
   }, [token, isDirecteur]);
 
-  // Handle real-time events
+  // Handle all real-time events
   useEffect(() => {
-    if (!latestEvent) return;
-    const { type, payload } = latestEvent as { type: string; payload: Record<string, unknown> };
+    if (!latestRealtimeEvent) return;
+    const { type: eventType, payload: eventPayload } = latestRealtimeEvent;
 
-    if (type === 'discussion_group_created') {
-      const g = payload as unknown as DiscussionGroup;
-      onGroupsChange(prev => prev.some(x => x.id === g.id) ? prev : [...prev, g]);
-      setSelectedGroupId(g.id);
+    if (eventType === 'discussion_group_created') {
+      const newGroup = eventPayload as unknown as DiscussionGroup;
+      onGroupsChange(previous =>
+        previous.some(g => g.id === newGroup.id) ? previous : [...previous, newGroup]
+      );
+      setSelectedGroupId(newGroup.id);
       return;
     }
 
-    if (
-      type === 'discussion_group_member_joined' ||
-      type === 'discussion_group_member_left' ||
-      type === 'discussion_group_member_connected' ||
-      type === 'discussion_group_member_disconnected'
-    ) {
-      const updatedGroup = (payload as { group: DiscussionGroup }).group;
-      onGroupsChange(prev => prev.map(g => g.id === updatedGroup.id ? { ...g, ...updatedGroup } : g));
+    if (['discussion_group_member_joined', 'discussion_group_member_left', 'discussion_group_member_connected', 'discussion_group_member_disconnected'].includes(eventType)) {
+      const updatedGroup = (eventPayload as { group: DiscussionGroup }).group;
+      onGroupsChange(previous =>
+        previous.map(g => g.id === updatedGroup.id ? { ...g, ...updatedGroup } : g)
+      );
       return;
     }
 
-    if (type === 'discussion_group_message') {
-      setLatestDGMessage(payload as unknown as DiscussionGroupMessage);
+    if (eventType === 'discussion_group_message') {
+      setLatestIncomingGroupMessage(eventPayload as unknown as DiscussionGroupMessage);
       return;
     }
 
-    if (type === 'discussion_group_typing') {
-      const { groupId, fromName } = payload as { groupId: string; fromName: string };
-      setGroupTypingNames(prev => {
-        const names = prev[groupId] || [];
-        if (names.includes(fromName)) return prev;
-        return { ...prev, [groupId]: [...names, fromName] };
+    if (eventType === 'discussion_group_system') {
+      const { groupId, eventType: systemEventType, actorUserId, actorUserName, createdAt } = eventPayload as {
+        groupId: string;
+        eventType: string;
+        actorUserId: string;
+        actorUserName: string;
+        group: DiscussionGroup;
+        createdAt: string;
+      };
+      const systemEvent: SystemEventItem = {
+        id: `${Date.now()}-${Math.random()}`,
+        eventType: systemEventType as SystemEventItem['eventType'],
+        actorUserId,
+        actorUserName,
+        createdAt,
+      };
+      setLatestSystemEventByGroupId(previous => ({ ...previous, [groupId]: systemEvent }));
+      return;
+    }
+
+    if (eventType === 'discussion_group_typing') {
+      const { groupId, fromName } = eventPayload as { groupId: string; fromName: string };
+      setTypingNamesByGroupId(previous => {
+        const currentNames = previous[groupId] || [];
+        return currentNames.includes(fromName) ? previous : { ...previous, [groupId]: [...currentNames, fromName] };
       });
-      // Auto-clear after 3s if no stop event
-      if (typingTimers.current[`${groupId}:${fromName}`]) {
-        clearTimeout(typingTimers.current[`${groupId}:${fromName}`]);
-      }
-      typingTimers.current[`${groupId}:${fromName}`] = setTimeout(() => {
-        setGroupTypingNames(prev => ({
-          ...prev,
-          [groupId]: (prev[groupId] || []).filter(n => n !== fromName),
+      const timerKey = `${groupId}:${fromName}`;
+      if (typingTimeoutsByKey.current[timerKey]) clearTimeout(typingTimeoutsByKey.current[timerKey]);
+      typingTimeoutsByKey.current[timerKey] = setTimeout(() => {
+        setTypingNamesByGroupId(previous => ({
+          ...previous,
+          [groupId]: (previous[groupId] || []).filter(name => name !== fromName),
         }));
       }, 3000);
       return;
     }
 
-    if (type === 'discussion_group_stop_typing') {
-      const { groupId, fromName } = payload as { groupId: string; fromName: string };
-      if (typingTimers.current[`${groupId}:${fromName}`]) {
-        clearTimeout(typingTimers.current[`${groupId}:${fromName}`]);
-      }
-      setGroupTypingNames(prev => ({
-        ...prev,
-        [groupId]: (prev[groupId] || []).filter(n => n !== fromName),
+    if (eventType === 'discussion_group_stop_typing') {
+      const { groupId, fromName } = eventPayload as { groupId: string; fromName: string };
+      const timerKey = `${groupId}:${fromName}`;
+      if (typingTimeoutsByKey.current[timerKey]) clearTimeout(typingTimeoutsByKey.current[timerKey]);
+      setTypingNamesByGroupId(previous => ({
+        ...previous,
+        [groupId]: (previous[groupId] || []).filter(name => name !== fromName),
       }));
       return;
     }
-  }, [latestEvent]);
+  }, [latestRealtimeEvent]);
 
   const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
 
-  const handleCreate = (name: string, memberIds: string[]) => {
-    onSend('create_discussion_group', { name, memberIds });
-    setShowCreateModal(false);
-  };
-
-  const handleJoin = (groupId: string) => {
-    onSend('join_discussion_group', { groupId });
-  };
-
-  const handleConnect = (groupId: string) => {
-    onSend('connect_discussion_group', { groupId });
-  };
-
-  const handleDisconnect = (groupId: string) => {
-    onSend('disconnect_discussion_group', { groupId });
-  };
-
-  const handleLeave = (groupId: string) => {
-    onSend('leave_discussion_group', { groupId });
-    if (selectedGroupId === groupId) setSelectedGroupId(null);
-  };
-
-  const handleSendMessage = (groupId: string, content: string) => {
-    onSend('discussion_group_message', { groupId, content });
-  };
-
-  const currentUserId = user?.id ?? '';
-
   return (
-    <div className="flex h-full">
-      {/* Sidebar: group list */}
-      <aside className="w-64 flex-shrink-0 border-r flex flex-col"
-        style={{ borderColor: 'var(--cream-dark)', background: 'white' }}>
-        <div className="px-4 py-4 border-b flex items-center justify-between"
-          style={{ borderColor: 'var(--cream-dark)' }}>
-          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(14,31,64,0.5)' }}>
-            Groupes de discussion
-          </p>
+    <div className="discussion-layout" style={{ display: 'flex', height: '100%' }}>
+      {/* Group list sidebar */}
+      <aside className="discussion-sidebar" style={{ width: 240, flexShrink: 0, background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '.68rem', fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Groupes de discussion</span>
           {isDirecteur && (
-            <button onClick={() => setShowCreateModal(true)}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-lg font-bold transition-colors"
-              title="Créer un groupe"
-              style={{ background: 'var(--gold)', color: 'var(--navy)' }}>
-              +
-            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--bronze)', color: 'var(--slate-900)', border: 'none', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >+</button>
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="discussion-group-list" style={{ flex: 1, overflowY: 'auto' }}>
           {groups.length === 0 && (
-            <div className="px-4 py-6 text-center text-sm" style={{ color: 'rgba(14,31,64,0.35)' }}>
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '.83rem' }}>
               {isDirecteur ? 'Créez votre premier groupe' : 'Aucun groupe disponible'}
             </div>
           )}
-          {groups.map(g => {
-            const isActive = g.id === selectedGroupId;
-            const isMember = g.memberIds.includes(currentUserId) || isDirecteur;
-            const isConnected = g.connectedMemberIds.includes(currentUserId);
-            const connectedCount = g.connectedMemberIds.length;
+          {groups.map(group => {
+            const isActiveGroup = group.id === selectedGroupId;
+            const isGroupMember = group.memberIds.includes(currentUserId) || isDirecteur;
+            const isConnected = group.connectedMemberIds.includes(currentUserId);
+            const groupTypingNames = typingNamesByGroupId[group.id] || [];
+
             return (
-              <div key={g.id}
-                className="border-b transition-all"
-                style={{ borderColor: 'rgba(14,31,64,0.06)', background: isActive ? 'rgba(184,134,11,0.07)' : 'transparent' }}>
+              <div key={group.id} style={{ borderBottom: '1px solid var(--surface-alt)', background: isActiveGroup ? 'var(--bronze-subtle)' : 'transparent' }}>
                 <button
-                  className="w-full text-left px-4 py-3 flex items-start gap-3"
-                  onClick={() => setSelectedGroupId(g.id)}>
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5"
-                    style={{ background: isActive ? 'var(--gold)' : 'rgba(14,31,64,0.08)' }}>
-                    <BuildingIcon size={14} style={{ color: isActive ? 'var(--navy)' : 'rgba(14,31,64,0.5)' }} />
+                  onClick={() => setSelectedGroupId(group.id)}
+                  style={{ width: '100%', textAlign: 'left', padding: '11px 16px', display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', borderLeft: `3px solid ${isActiveGroup ? 'var(--bronze)' : 'transparent'}`, cursor: 'pointer', transition: 'all .15s' }}
+                >
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: isActiveGroup ? 'var(--bronze)' : 'var(--surface-alt)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke={isActiveGroup ? 'var(--slate-900)' : 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round"/>
+                      <circle cx="9" cy="7" r="4" stroke={isActiveGroup ? 'var(--slate-900)' : 'var(--text-muted)'} strokeWidth="2"/>
+                    </svg>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--navy)' }}>{g.name}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ background: isConnected ? '#22c55e' : (isMember ? '#f59e0b' : '#94a3b8') }} />
-                      <span className="text-xs truncate" style={{ color: 'rgba(14,31,64,0.5)' }}>
-                        {connectedCount} connecté{connectedCount > 1 ? 's' : ''}
-                      </span>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: '.85rem', fontWeight: isActiveGroup ? 700 : 500, color: isActiveGroup ? 'var(--bronze-dark)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {group.name}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                      {groupTypingNames.length > 0 ? (
+                        <>
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                            <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                            <span className="typing-dot" style={{ width: 5, height: 5 }}/>
+                          </div>
+                          <span style={{ fontSize: '.7rem', color: 'var(--bronze)', fontStyle: 'italic' }}>
+                            {groupTypingNames.length === 1 ? `${groupTypingNames[0]} écrit…` : 'Plusieurs personnes écrivent…'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: isConnected ? 'var(--success)' : isGroupMember ? 'var(--bronze)' : 'var(--border)', flexShrink: 0 }}/>
+                          <span style={{ fontSize: '.7rem', color: 'var(--text-muted)' }}>
+                            {group.connectedMemberIds.length} connecté{group.connectedMemberIds.length > 1 ? 's' : ''}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </button>
-                {!isDirecteur && !isMember && (
-                  <div className="px-4 pb-2">
-                    <button onClick={() => handleJoin(g.id)}
-                      className="w-full text-xs py-1.5 rounded font-medium"
-                      style={{ background: 'rgba(184,134,11,0.12)', color: 'var(--navy)', border: '1px solid rgba(184,134,11,0.3)' }}>
+                {!isDirecteur && !isGroupMember && (
+                  <div style={{ padding: '0 14px 10px' }}>
+                    <button
+                      onClick={() => onSend('join_discussion_group', { groupId: group.id })}
+                      style={{ width: '100%', fontSize: '.76rem', padding: '6px', borderRadius: 'var(--r)', background: 'var(--bronze-subtle)', color: 'var(--bronze-dark)', border: '1px solid var(--bronze-border)', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600 }}
+                    >
                       Rejoindre
                     </button>
                   </div>
@@ -498,28 +595,32 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
         </div>
       </aside>
 
-      {/* Main panel */}
-      <div className="flex-1 overflow-hidden">
+      {/* Group detail panel */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
         {selectedGroup ? (
-          <GroupDetail
+          <GroupDiscussionDetail
             group={selectedGroup}
             currentUserId={currentUserId}
             isDirecteur={isDirecteur}
-            onConnect={() => handleConnect(selectedGroup.id)}
-            onDisconnect={() => handleDisconnect(selectedGroup.id)}
-            onLeave={() => handleLeave(selectedGroup.id)}
-            onSendMessage={(content) => handleSendMessage(selectedGroup.id, content)}
-            onTyping={() => onSend('discussion_group_typing', { groupId: selectedGroup.id })}
+            onConnect={() => onSend('connect_discussion_group', { groupId: selectedGroup.id })}
+            onDisconnect={() => onSend('disconnect_discussion_group', { groupId: selectedGroup.id })}
+            onLeave={() => { onSend('leave_discussion_group', { groupId: selectedGroup.id }); setSelectedGroupId(null); }}
+            onSendMessage={content => onSend('discussion_group_message', { groupId: selectedGroup.id, content })}
+            onStartTyping={() => onSend('discussion_group_typing', { groupId: selectedGroup.id })}
             onStopTyping={() => onSend('discussion_group_stop_typing', { groupId: selectedGroup.id })}
-            newMessage={latestDGMessage}
-            typingNames={groupTypingNames[selectedGroup.id] || []}
+            latestIncomingMessage={latestIncomingGroupMessage}
+            currentlyTypingNames={typingNamesByGroupId[selectedGroup.id] || []}
+            latestSystemEvent={latestSystemEventByGroupId[selectedGroup.id]}
           />
         ) : (
-          <div className="h-full flex flex-col items-center justify-center text-center p-8"
-            style={{ color: 'rgba(14,31,64,0.35)' }}>
-            <BuildingIcon size={40} style={{ color: 'rgba(184,134,11,0.3)', marginBottom: 12 }} />
-            <p className="text-sm font-medium" style={{ color: 'rgba(14,31,64,0.4)' }}>
-              {isDirecteur ? 'Sélectionnez ou créez un groupe de discussion' : 'Sélectionnez un groupe pour participer'}
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" style={{ marginBottom: 12, opacity: .3 }}>
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            <p style={{ fontSize: '.88rem' }}>
+              {isDirecteur ? 'Sélectionnez ou créez un groupe' : 'Sélectionnez un groupe pour participer'}
             </p>
           </div>
         )}
@@ -527,9 +628,12 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
 
       {showCreateModal && (
         <CreateGroupModal
-          conseillers={conseillers}
+          availableConseillers={availableConseillers}
           onClose={() => setShowCreateModal(false)}
-          onCreate={handleCreate}
+          onCreate={(groupName, invitedMemberIds) => {
+            onSend('create_discussion_group', { name: groupName, memberIds: invitedMemberIds });
+            setShowCreateModal(false);
+          }}
         />
       )}
     </div>

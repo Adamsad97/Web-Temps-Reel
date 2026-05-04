@@ -13,32 +13,82 @@ import {
   createDiscussionGroup,
 } from './db';
 import { sendSSEToUser } from './sse';
+import { sendWebPushToUser } from './webpush';
 import { AuthPayload, Message, GroupMessage, DiscussionGroupMessage } from '../types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'avenir_bank_super_secret_jwt_2024';
-
 const STAFF_ROLES = ['conseiller', 'directeur'] as const;
 
-interface ConnectedClient {
+interface ConnectedStaffClient {
   ws: WebSocket;
   userId: string;
   role: string;
 }
 
-const connectedClients = new Map<string, ConnectedClient>();
+const connectedClients = new Map<string, ConnectedStaffClient>();
 
-function sendToClient(targetUserId: string, payload: object): void {
-  const targetClient = connectedClients.get(targetUserId);
-  if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-    targetClient.ws.send(JSON.stringify(payload));
+/** Send a WebSocket payload to a single connected user (no-op if offline). */
+function sendToConnectedClient(targetUserId: string, payload: object): void {
+  const client = connectedClients.get(targetUserId);
+  if (client && client.ws.readyState === WebSocket.OPEN) {
+    client.ws.send(JSON.stringify(payload));
   }
+}
+
+/** Send the same WebSocket payload to a set of connected users. */
+function broadcastToConnectedUsers(userIds: Iterable<string>, payload: object): void {
+  for (const userId of userIds) sendToConnectedClient(userId, payload);
+}
+
+/**
+ * Delivers a push notification to a user via SSE + Web Push.
+ * Used for events that must reach users even when the app is in the background.
+ */
+function deliverPushNotificationToUser(
+  recipientUserId: string,
+  notificationTitle: string,
+  notificationBody: string,
+  notificationTag?: string
+): void {
+  const savedNotification = addNotification(recipientUserId, 'message', notificationBody);
+  sendSSEToUser(recipientUserId, 'notification', savedNotification);
+  sendWebPushToUser(recipientUserId, notificationTitle, notificationBody, notificationTag).catch(() => {});
+}
+
+/**
+ * Broadcasts a system event (join/leave/connect/disconnect) to all group members.
+ * Includes the actorUserId so the frontend can personalise the message
+ * ("Vous avez rejoint" vs "Adama a rejoint") based on who is viewing.
+ */
+function broadcastGroupSystemEvent(
+  groupId: string,
+  memberIds: string[],
+  groupCreatorId: string,
+  eventType: string,
+  actorUserName: string,
+  actorUserId: string,
+  updatedGroup: object
+): void {
+  const systemEventPayload = {
+    type: 'discussion_group_system',
+    payload: {
+      groupId,
+      eventType,
+      actorUserId,
+      actorUserName,
+      group: updatedGroup,
+      createdAt: new Date().toISOString(),
+    },
+  };
+  const recipientIds = new Set([groupCreatorId, ...memberIds]);
+  broadcastToConnectedUsers(recipientIds, systemEventPayload);
 }
 
 export function setupWebSocketServer(wss: WebSocketServer): void {
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
     let isAuthenticated = false;
-    let connectedUserId = '';
-    let connectedUserRole = '';
+    let currentUserId = '';
+    let currentUserRole = '';
 
     ws.on('message', (rawBuffer: Buffer) => {
       let incomingMessage: { type: string; payload: Record<string, unknown> };
@@ -48,17 +98,21 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
+      // ── Authentication ───────────────────────────────────────
       if (incomingMessage.type === 'auth') {
         try {
           const decodedToken = jwt.verify(
             incomingMessage.payload.token as string,
             JWT_SECRET
           ) as AuthPayload;
-          connectedUserId = decodedToken.userId;
-          connectedUserRole = decodedToken.role;
+          currentUserId = decodedToken.userId;
+          currentUserRole = decodedToken.role;
           isAuthenticated = true;
-          connectedClients.set(connectedUserId, { ws, userId: connectedUserId, role: connectedUserRole });
-          ws.send(JSON.stringify({ type: 'auth_ok', payload: { userId: connectedUserId, role: connectedUserRole } }));
+          connectedClients.set(currentUserId, { ws, userId: currentUserId, role: currentUserRole });
+          ws.send(JSON.stringify({
+            type: 'auth_ok',
+            payload: { userId: currentUserId, role: currentUserRole },
+          }));
         } catch {
           ws.send(JSON.stringify({ type: 'error', payload: { message: 'Invalid token' } }));
           ws.close();
@@ -71,15 +125,19 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         return;
       }
 
+      // ── Private message ──────────────────────────────────────
       if (incomingMessage.type === 'private_message') {
-        const { toId: recipientId, content: messageContent } = incomingMessage.payload as { toId: string; content: string };
-        const sender = findUserById(connectedUserId);
+        const { toId: recipientId, content: messageContent } = incomingMessage.payload as {
+          toId: string;
+          content: string;
+        };
+        const sender = findUserById(currentUserId);
         const recipient = findUserById(recipientId);
         if (!sender || !recipient) return;
 
         const privateMessage: Message = {
           id: uuidv4(),
-          fromId: connectedUserId,
+          fromId: currentUserId,
           toId: recipientId,
           content: messageContent,
           createdAt: new Date().toISOString(),
@@ -87,222 +145,256 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         };
         messages.push(privateMessage);
 
-        const outgoingPayload = {
+        const enrichedPayload = {
           type: 'private_message',
           payload: { ...privateMessage, fromName: sender.name, fromRole: sender.role },
         };
-        sendToClient(recipientId, outgoingPayload);
-        ws.send(JSON.stringify(outgoingPayload));
+        sendToConnectedClient(recipientId, enrichedPayload);
+        ws.send(JSON.stringify(enrichedPayload));
 
-        const newNotification = addNotification(
+        deliverPushNotificationToUser(
           recipientId,
-          'message',
-          `Nouveau message de ${sender.name}`,
-          privateMessage.id
+          `Message de ${sender.name}`,
+          messageContent.slice(0, 100),
+          `private-msg-from-${currentUserId}`
         );
-        sendSSEToUser(recipientId, 'notification', newNotification);
         return;
       }
 
+      // ── Group channel message (Canal Interne) ────────────────
       if (incomingMessage.type === 'group_message') {
-        const { content: groupMessageContent } = incomingMessage.payload as { content: string };
-        const sender = findUserById(connectedUserId);
-        if (!sender) return;
-
-        if (sender.role === 'client') {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Clients cannot use the group channel' } }));
-          return;
-        }
+        const { content: messageContent } = incomingMessage.payload as { content: string };
+        const sender = findUserById(currentUserId);
+        if (!sender || sender.role === 'client') return;
 
         const groupMessage: GroupMessage = {
           id: uuidv4(),
-          fromId: connectedUserId,
+          fromId: currentUserId,
           fromName: sender.name,
           fromRole: sender.role,
-          content: groupMessageContent,
+          content: messageContent,
           createdAt: new Date().toISOString(),
           type: 'group',
         };
         groupMessages.push(groupMessage);
 
-        const staffUserIds = users
+        const allStaffIds = users
           .filter(u => STAFF_ROLES.includes(u.role as typeof STAFF_ROLES[number]))
           .map(u => u.id);
 
-        for (const staffUserId of staffUserIds) {
-          sendToClient(staffUserId, { type: 'group_message', payload: groupMessage });
+        broadcastToConnectedUsers(allStaffIds, { type: 'group_message', payload: groupMessage });
+
+        // Push notification to staff members who are currently offline
+        const offlineStaffIds = allStaffIds.filter(
+          id => id !== currentUserId && !connectedClients.has(id)
+        );
+        for (const staffId of offlineStaffIds) {
+          deliverPushNotificationToUser(
+            staffId,
+            `Canal Interne — ${sender.name}`,
+            messageContent.slice(0, 100),
+            'canal-interne'
+          );
         }
         return;
       }
 
+      // ── Typing indicators (private + group channel) ──────────
       if (incomingMessage.type === 'typing' || incomingMessage.type === 'stop_typing') {
-        const { toId: typingTargetId, channel: typingChannel } = incomingMessage.payload as {
+        const { toId: recipientId, channel: messageChannel } = incomingMessage.payload as {
           toId?: string;
           channel?: string;
         };
-        const sender = findUserById(connectedUserId);
+        const sender = findUserById(currentUserId);
         if (!sender) return;
 
-        if (typingChannel === 'group') {
+        if (messageChannel === 'group') {
           const otherStaffIds = users
-            .filter(u => STAFF_ROLES.includes(u.role as typeof STAFF_ROLES[number]) && u.id !== connectedUserId)
+            .filter(u => STAFF_ROLES.includes(u.role as typeof STAFF_ROLES[number]) && u.id !== currentUserId)
             .map(u => u.id);
-          for (const staffId of otherStaffIds) {
-            sendToClient(staffId, {
-              type: incomingMessage.type,
-              payload: { fromId: connectedUserId, fromName: sender.name, channel: 'group' },
-            });
-          }
-        } else if (typingTargetId) {
-          sendToClient(typingTargetId, {
+          broadcastToConnectedUsers(otherStaffIds, {
             type: incomingMessage.type,
-            payload: { fromId: connectedUserId, fromName: sender.name },
+            payload: { fromId: currentUserId, fromName: sender.name, channel: 'group' },
+          });
+        } else if (recipientId) {
+          sendToConnectedClient(recipientId, {
+            type: incomingMessage.type,
+            payload: { fromId: currentUserId, fromName: sender.name },
           });
         }
         return;
       }
 
+      // ── Discussion group: create ─────────────────────────────
       if (incomingMessage.type === 'create_discussion_group') {
-        const sender = findUserById(connectedUserId);
-        if (!sender || sender.role !== 'directeur') {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Seul le directeur peut creer des groupes de discussion' } }));
+        const creator = findUserById(currentUserId);
+        if (!creator || creator.role !== 'directeur') {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Seul le directeur peut créer des groupes' } }));
           return;
         }
-        const { name, memberIds } = incomingMessage.payload as { name: string; memberIds: string[] };
-        if (!name || !memberIds) return;
+        const { name: groupName, memberIds: invitedMemberIds } = incomingMessage.payload as {
+          name: string;
+          memberIds: string[];
+        };
+        if (!groupName || !invitedMemberIds) return;
 
-        const group = createDiscussionGroup(name, connectedUserId, sender.name, memberIds);
+        const newGroup = createDiscussionGroup(groupName, currentUserId, creator.name, invitedMemberIds);
+        const allGroupMemberIds = new Set([currentUserId, ...invitedMemberIds]);
+        broadcastToConnectedUsers(allGroupMemberIds, { type: 'discussion_group_created', payload: newGroup });
 
-        const notifyIds = new Set([connectedUserId, ...memberIds]);
-        for (const uid of notifyIds) {
-          sendToClient(uid, { type: 'discussion_group_created', payload: group });
+        for (const invitedUserId of invitedMemberIds) {
+          deliverPushNotificationToUser(
+            invitedUserId,
+            'AVENIR — Nouveau groupe de discussion',
+            `Vous avez été invité au groupe "${groupName}" par ${creator.name}`,
+            `group-${newGroup.id}`
+          );
         }
         return;
       }
 
+      // ── Discussion group: join ───────────────────────────────
       if (incomingMessage.type === 'join_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender) return;
-        if (!group.memberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+        const actor = findUserById(currentUserId);
+        if (!group || !actor) return;
+        // Allow any authenticated user to join (no guard blocking non-members)
 
-        if (!group.memberIds.includes(connectedUserId)) {
-          group.memberIds.push(connectedUserId);
-        }
-        if (!group.connectedMemberIds.includes(connectedUserId)) {
-          group.connectedMemberIds.push(connectedUserId);
-        }
+        if (!group.memberIds.includes(currentUserId)) group.memberIds.push(currentUserId);
+        if (!group.connectedMemberIds.includes(currentUserId)) group.connectedMemberIds.push(currentUserId);
 
-        const joinPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
-        const joinNotifyIds = new Set([group.createdBy, ...group.memberIds]);
-        for (const uid of joinNotifyIds) {
-          sendToClient(uid, { type: 'discussion_group_member_joined', payload: joinPayload });
-        }
+        const allGroupIds = new Set([group.createdBy, ...group.memberIds]);
+        broadcastToConnectedUsers(allGroupIds, {
+          type: 'discussion_group_member_joined',
+          payload: { groupId, userId: currentUserId, userName: actor.name, group },
+        });
+        broadcastGroupSystemEvent(groupId, group.memberIds, group.createdBy, 'joined', actor.name, currentUserId, group);
         return;
       }
 
+      // ── Discussion group: connect ────────────────────────────
       if (incomingMessage.type === 'connect_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender) return;
-        if (!group.memberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+        const actor = findUserById(currentUserId);
+        if (!group || !actor) return;
+        if (!group.memberIds.includes(currentUserId) && group.createdBy !== currentUserId) return;
 
-        if (!group.connectedMemberIds.includes(connectedUserId)) {
-          group.connectedMemberIds.push(connectedUserId);
-        }
+        if (!group.connectedMemberIds.includes(currentUserId)) group.connectedMemberIds.push(currentUserId);
 
-        const connectPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
-        const connectNotifyIds = new Set([group.createdBy, ...group.memberIds]);
-        for (const uid of connectNotifyIds) {
-          sendToClient(uid, { type: 'discussion_group_member_connected', payload: connectPayload });
-        }
+        const allGroupIds = new Set([group.createdBy, ...group.memberIds]);
+        broadcastToConnectedUsers(allGroupIds, {
+          type: 'discussion_group_member_connected',
+          payload: { groupId, userId: currentUserId, userName: actor.name, group },
+        });
+        broadcastGroupSystemEvent(groupId, group.memberIds, group.createdBy, 'connected', actor.name, currentUserId, group);
         return;
       }
 
+      // ── Discussion group: disconnect ─────────────────────────
       if (incomingMessage.type === 'disconnect_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender) return;
+        const actor = findUserById(currentUserId);
+        if (!group || !actor) return;
 
-        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== connectedUserId);
+        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== currentUserId);
 
-        const disconnectPayload = { groupId, userId: connectedUserId, userName: sender.name, group };
-        const disconnectNotifyIds = new Set([group.createdBy, ...group.memberIds]);
-        for (const uid of disconnectNotifyIds) {
-          sendToClient(uid, { type: 'discussion_group_member_disconnected', payload: disconnectPayload });
-        }
+        const allGroupIds = new Set([group.createdBy, ...group.memberIds]);
+        broadcastToConnectedUsers(allGroupIds, {
+          type: 'discussion_group_member_disconnected',
+          payload: { groupId, userId: currentUserId, userName: actor.name, group },
+        });
+        broadcastGroupSystemEvent(groupId, group.memberIds, group.createdBy, 'disconnected', actor.name, currentUserId, group);
         return;
       }
 
+      // ── Discussion group: leave ──────────────────────────────
       if (incomingMessage.type === 'leave_discussion_group') {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender) return;
+        const actor = findUserById(currentUserId);
+        if (!group || !actor) return;
 
-        group.memberIds = group.memberIds.filter(id => id !== connectedUserId);
-        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== connectedUserId);
+        const memberIdsBeforeLeave = [...group.memberIds];
+        group.memberIds = group.memberIds.filter(id => id !== currentUserId);
+        group.connectedMemberIds = group.connectedMemberIds.filter(id => id !== currentUserId);
 
-        const leavePayload = { groupId, userId: connectedUserId, userName: sender.name, group };
-        const leaveNotifyIds = new Set([group.createdBy, ...group.memberIds, connectedUserId]);
-        for (const uid of leaveNotifyIds) {
-          sendToClient(uid, { type: 'discussion_group_member_left', payload: leavePayload });
-        }
+        const allPreviousGroupIds = new Set([group.createdBy, ...memberIdsBeforeLeave]);
+        broadcastToConnectedUsers(allPreviousGroupIds, {
+          type: 'discussion_group_member_left',
+          payload: { groupId, userId: currentUserId, userName: actor.name, group },
+        });
+        broadcastGroupSystemEvent(groupId, group.memberIds, group.createdBy, 'left', actor.name, currentUserId, group);
         return;
       }
 
+      // ── Discussion group: typing indicators ──────────────────
       if (
         incomingMessage.type === 'discussion_group_typing' ||
         incomingMessage.type === 'discussion_group_stop_typing'
       ) {
         const { groupId } = incomingMessage.payload as { groupId: string };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender) return;
+        const actor = findUserById(currentUserId);
+        if (!group || !actor) return;
 
-        const typingNotifyIds = new Set([group.createdBy, ...group.connectedMemberIds]);
-        typingNotifyIds.delete(connectedUserId);
-        for (const uid of typingNotifyIds) {
-          sendToClient(uid, {
-            type: incomingMessage.type,
-            payload: { groupId, fromId: connectedUserId, fromName: sender.name },
-          });
-        }
+        const otherConnectedMemberIds = new Set([group.createdBy, ...group.connectedMemberIds]);
+        otherConnectedMemberIds.delete(currentUserId);
+        broadcastToConnectedUsers(otherConnectedMemberIds, {
+          type: incomingMessage.type,
+          payload: { groupId, fromId: currentUserId, fromName: actor.name },
+        });
         return;
       }
 
+      // ── Discussion group: send message ───────────────────────
       if (incomingMessage.type === 'discussion_group_message') {
-        const { groupId, content } = incomingMessage.payload as { groupId: string; content: string };
+        const { groupId, content: messageContent } = incomingMessage.payload as {
+          groupId: string;
+          content: string;
+        };
         const group = findDiscussionGroupById(groupId);
-        const sender = findUserById(connectedUserId);
-        if (!group || !sender || !content) return;
-        if (!group.connectedMemberIds.includes(connectedUserId) && group.createdBy !== connectedUserId) return;
+        const sender = findUserById(currentUserId);
+        if (!group || !sender || !messageContent) return;
+        if (!group.connectedMemberIds.includes(currentUserId) && group.createdBy !== currentUserId) return;
 
-        const dgMessage: DiscussionGroupMessage = {
+        const groupMessage: DiscussionGroupMessage = {
           id: uuidv4(),
           groupId,
-          fromId: connectedUserId,
+          fromId: currentUserId,
           fromName: sender.name,
           fromRole: sender.role,
-          content,
+          content: messageContent,
           createdAt: new Date().toISOString(),
           type: 'discussion_group',
         };
-        discussionGroupMessages.push(dgMessage);
+        discussionGroupMessages.push(groupMessage);
 
-        const dgNotifyIds = new Set([group.createdBy, ...group.connectedMemberIds]);
-        for (const uid of dgNotifyIds) {
-          sendToClient(uid, { type: 'discussion_group_message', payload: dgMessage });
+        const currentlyConnectedIds = new Set([group.createdBy, ...group.connectedMemberIds]);
+        broadcastToConnectedUsers(currentlyConnectedIds, {
+          type: 'discussion_group_message',
+          payload: groupMessage,
+        });
+
+        // Push notification to all group members who are not currently connected
+        const allGroupMemberIds = new Set([group.createdBy, ...group.memberIds]);
+        allGroupMemberIds.delete(currentUserId);
+        for (const memberId of allGroupMemberIds) {
+          deliverPushNotificationToUser(
+            memberId,
+            `${sender.name} — ${group.name}`,
+            messageContent.slice(0, 100),
+            `group-${groupId}`
+          );
         }
         return;
       }
     });
 
     ws.on('close', () => {
-      if (connectedUserId) connectedClients.delete(connectedUserId);
+      if (currentUserId) connectedClients.delete(currentUserId);
     });
   });
 }

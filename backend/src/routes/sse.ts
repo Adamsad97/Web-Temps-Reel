@@ -56,12 +56,19 @@ router.post('/news', authMiddleware, requireRole('conseiller', 'directeur'), (re
   };
   news.push(newsItem);
 
+  // Broadcast news article to ALL connected users via SSE
   broadcastSSE('news', newsItem);
 
-  const bankClients = users.filter(u => u.role === 'client');
-  for (const bankClient of bankClients) {
-    const notification = addNotification(bankClient.id, 'news', `Actualité : ${title}`, newsItem.id);
-    sendSSEToUser(bankClient.id, 'notification', notification);
+  // Send notification to ALL users EXCEPT the author
+  const allOtherUsers = users.filter(u => u.id !== author.id);
+  for (const targetUser of allOtherUsers) {
+    const notification = addNotification(
+      targetUser.id,
+      'news',
+      `Actualité publiée par ${author.name} : ${title}`,
+      newsItem.id
+    );
+    sendSSEToUser(targetUser.id, 'notification', notification);
   }
 
   res.status(201).json(newsItem);

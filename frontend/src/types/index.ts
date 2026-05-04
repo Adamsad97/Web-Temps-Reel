@@ -75,3 +75,11 @@ export interface DiscussionGroupMessage {
   createdAt: string;
   type: 'discussion_group';
 }
+
+export interface DiscussionGroupSystemEvent {
+  id: string;
+  groupId: string;
+  eventType: 'joined' | 'left' | 'connected' | 'disconnected';
+  userName: string;
+  createdAt: string;
+}
