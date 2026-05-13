@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from 'react';
 import { GroupMessage } from '@/types';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-
-const TYPING_STOP_DELAY_MS = 2000;
+import { useTyping } from '@/lib/use-typing';
+import TypingIndicator from './TypingIndicator';
 
 interface GroupChatProps {
   onSendMessage: (content: string) => void;
@@ -14,73 +14,40 @@ interface GroupChatProps {
   currentlyTypingNames?: string[];
 }
 
-export default function GroupChat({
-  onSendMessage,
-  onStartTyping,
-  onStopTyping,
-  latestIncomingMessage,
-  currentlyTypingNames = [],
-}: GroupChatProps) {
+export default function GroupChat({ onSendMessage, onStartTyping, onStopTyping, latestIncomingMessage, currentlyTypingNames = [] }: GroupChatProps) {
   const { token, user } = useAuth();
   const [messageHistory, setMessageHistory] = useState<GroupMessage[]>([]);
-  const [draftMessage, setDraftMessage] = useState('');
-  const messagesBottomRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isCurrentlyTypingRef = useRef(false);
+  const [draftMessage, setDraftMessage]     = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const { handleTypingInput, cancelTyping } = useTyping({ onStartTyping, onStopTyping });
 
   useEffect(() => {
-    apiFetch<GroupMessage[]>('/api/messages/group', token)
-      .then(setMessageHistory)
-      .catch(() => {});
+    apiFetch<GroupMessage[]>('/api/messages/group', token).then(setMessageHistory).catch(() => {});
   }, [token]);
 
   useEffect(() => {
     if (!latestIncomingMessage) return;
-    setMessageHistory(previous =>
-      previous.some(existingMessage => existingMessage.id === latestIncomingMessage.id)
-        ? previous
-        : [...previous, latestIncomingMessage]
+    setMessageHistory(prev =>
+      prev.some(m => m.id === latestIncomingMessage.id) ? prev : [...prev, latestIncomingMessage]
     );
   }, [latestIncomingMessage]);
 
   useEffect(() => {
-    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messageHistory, currentlyTypingNames]);
 
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setDraftMessage(event.target.value);
-    if (!isCurrentlyTypingRef.current) {
-      isCurrentlyTypingRef.current = true;
-      onStartTyping();
-    }
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      isCurrentlyTypingRef.current = false;
-      onStopTyping();
-    }, TYPING_STOP_DELAY_MS);
-  };
-
-  const handleSendMessage = () => {
-    const trimmedContent = draftMessage.trim();
-    if (!trimmedContent) return;
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    isCurrentlyTypingRef.current = false;
-    onStopTyping();
-    onSendMessage(trimmedContent);
+  const handleSend = () => {
+    const content = draftMessage.trim();
+    if (!content) return;
+    cancelTyping();
+    onSendMessage(content);
     setDraftMessage('');
   };
 
-  const getRoleDisplayStyle = (role: string) =>
+  const getRoleStyle = (role: string) =>
     role === 'directeur'
       ? { label: 'Directeur', backgroundColor: 'rgba(181,129,62,.15)', color: 'var(--bronze-dark)' }
       : { label: 'Conseiller', backgroundColor: 'var(--surface-alt)', color: 'var(--text-2)' };
-
-  const formatTypingIndicatorText = (names: string[]): string => {
-    if (names.length === 1) return `${names[0]} est en train d'écrire un message…`;
-    const allButLast = names.slice(0, -1).join(', ');
-    const last = names[names.length - 1];
-    return `${allButLast} et ${last} écrivent un message…`;
-  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -103,7 +70,9 @@ export default function GroupChat({
                 <span className="typing-dot" style={{ width: 5, height: 5 }}/>
               </div>
               <p style={{ fontSize: '0.72rem', color: 'var(--bronze)', fontWeight: 600, fontStyle: 'italic' }}>
-                {formatTypingIndicatorText(currentlyTypingNames)}
+                {currentlyTypingNames.length === 1
+                  ? `${currentlyTypingNames[0]} est en train d'écrire…`
+                  : 'Plusieurs personnes écrivent…'}
               </p>
             </div>
           ) : (
@@ -122,15 +91,11 @@ export default function GroupChat({
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {messageHistory.map((message, index) => {
-            const isSentByCurrentUser = message.fromId === user?.id;
-            const roleStyle = getRoleDisplayStyle(message.fromRole);
+            const isMe = message.fromId === user?.id;
+            const roleStyle = getRoleStyle(message.fromRole);
             return (
-              <div
-                key={message.id || index}
-                className={isSentByCurrentUser ? 'slide-in-right' : 'slide-in-left'}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: isSentByCurrentUser ? 'flex-end' : 'flex-start' }}
-              >
-                {!isSentByCurrentUser && (
+              <div key={message.id || index} className={isMe ? 'slide-in-right' : 'slide-in-left'} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                {!isMe && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, paddingLeft: 2 }}>
                     <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--slate-900)', color: 'var(--bronze)', fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {message.fromName[0]}
@@ -141,7 +106,7 @@ export default function GroupChat({
                     </span>
                   </div>
                 )}
-                <div className={isSentByCurrentUser ? 'bubble-me' : 'bubble-other'}>{message.content}</div>
+                <div className={isMe ? 'bubble-me' : 'bubble-other'}>{message.content}</div>
                 <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3, paddingLeft: 2, paddingRight: 2 }}>
                   {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                 </span>
@@ -149,21 +114,8 @@ export default function GroupChat({
             );
           })}
         </div>
-
-        {currentlyTypingNames.length > 0 && (
-          <div className="sys-pill typing" style={{ marginTop: 10 }}>
-            <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-              <span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/>
-            </span>
-            <span>
-              {currentlyTypingNames.length === 1
-                ? <><strong>{currentlyTypingNames[0]}</strong> est en train d&apos;écrire un message…</>
-                : <><strong>{currentlyTypingNames.slice(0, -1).join(', ')}</strong> et <strong>{currentlyTypingNames[currentlyTypingNames.length - 1]}</strong> écrivent un message…</>
-              }
-            </span>
-          </div>
-        )}
-        <div ref={messagesBottomRef} />
+        <TypingIndicator names={currentlyTypingNames} />
+        <div ref={bottomRef} />
       </div>
 
       <div style={{ padding: '12px 20px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
@@ -171,10 +123,10 @@ export default function GroupChat({
           className="input-avenir"
           placeholder="Message au canal interne…"
           value={draftMessage}
-          onChange={handleInputChange}
-          onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+          onChange={e => { setDraftMessage(e.target.value); handleTypingInput(); }}
+          onKeyDown={e => e.key === 'Enter' && handleSend()}
         />
-        <button className="btn-dark" onClick={handleSendMessage} style={{ flexShrink: 0 }}>Envoyer</button>
+        <button className="btn-dark" onClick={handleSend} style={{ flexShrink: 0 }}>Envoyer</button>
       </div>
     </div>
   );

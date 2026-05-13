@@ -2,38 +2,33 @@
 import { useEffect, useRef } from 'react';
 
 const BACKEND_API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-const SERVICE_WORKER_PATH = '/service-worker.js';
+const SERVICE_WORKER_PATH  = '/service-worker.js';
 const SERVICE_WORKER_SCOPE = '/';
 
 /**
- * Converts a VAPID base64 public key string to a Uint8Array
- * required by the PushManager.subscribe() API.
+ * Converts a VAPID base64url public key to a Uint8Array<ArrayBuffer>
+ * as required by PushManager.subscribe() — uses new Uint8Array() to
+ * guarantee a strict ArrayBuffer (not ArrayBufferLike) backing store.
  */
-function convertVapidKeyToUint8Array(vapidBase64Key: string): Uint8Array {
-  const paddingNeeded = '='.repeat((4 - (vapidBase64Key.length % 4)) % 4);
-  const base64WithPadding = (vapidBase64Key + paddingNeeded)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-  const rawBinaryString = window.atob(base64WithPadding);
-  return Uint8Array.from([...rawBinaryString].map(char => char.charCodeAt(0)));
+function convertVapidKeyToUint8Array(vapidBase64Key: string): Uint8Array<ArrayBuffer> {
+  const padding      = '='.repeat((4 - (vapidBase64Key.length % 4)) % 4);
+  const base64       = (vapidBase64Key + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const binaryString = window.atob(base64);
+  const bytes        = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
 }
 
-/**
- * Fetches the VAPID public key from the backend.
- * Needed to create a push subscription tied to this server.
- */
 async function fetchVapidPublicKey(): Promise<string> {
   const response = await fetch(`${BACKEND_API_BASE_URL}/api/push/vapid-public-key`);
-  const { publicKey } = await response.json();
+  const { publicKey } = await response.json() as { publicKey: string };
   return publicKey;
 }
 
-/**
- * Sends a PushSubscription object to the backend so the server
- * can deliver Web Push notifications to this browser session.
- */
 async function registerSubscriptionWithBackend(
-  pushSubscription: PushSubscription,
+  subscription: PushSubscription,
   authToken: string
 ): Promise<void> {
   await fetch(`${BACKEND_API_BASE_URL}/api/push/subscribe`, {
@@ -42,64 +37,56 @@ async function registerSubscriptionWithBackend(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ subscription: pushSubscription.toJSON() }),
+    body: JSON.stringify({ subscription: subscription.toJSON() }),
   });
 }
 
-/**
- * Creates or retrieves an existing push subscription for the current browser,
- * then registers it with the backend so the server can send push notifications.
- */
 async function createOrRefreshPushSubscription(
-  serviceWorkerRegistration: ServiceWorkerRegistration,
+  registration: ServiceWorkerRegistration,
   authToken: string
 ): Promise<void> {
-  const vapidPublicKey = await fetchVapidPublicKey();
+  const vapidPublicKey      = await fetchVapidPublicKey();
   const applicationServerKey = convertVapidKeyToUint8Array(vapidPublicKey);
 
-  const existingSubscription = await serviceWorkerRegistration.pushManager.getSubscription();
-  if (existingSubscription) {
-    await registerSubscriptionWithBackend(existingSubscription, authToken);
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) {
+    await registerSubscriptionWithBackend(existing, authToken);
     return;
   }
 
-  const newSubscription = await serviceWorkerRegistration.pushManager.subscribe({
+  const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey,
   });
-  await registerSubscriptionWithBackend(newSubscription, authToken);
+  await registerSubscriptionWithBackend(subscription, authToken);
 }
 
-/**
- * React hook that registers the service worker and subscribes the current user
- * to Web Push notifications. Safe to call on every render — runs only once per session.
- */
 export function usePushNotifications(authToken: string | null): void {
-  const hasAlreadySubscribedRef = useRef(false);
+  const subscribedRef = useRef(false);
 
   useEffect(() => {
-    if (!authToken || hasAlreadySubscribedRef.current) return;
+    if (!authToken || subscribedRef.current) return;
     if (typeof window === 'undefined') return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
-    async function initializePushNotifications() {
+    async function init() {
       try {
-        const permissionStatus = await Notification.requestPermission();
-        if (permissionStatus !== 'granted') return;
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return;
 
-        const serviceWorkerRegistration = await navigator.serviceWorker.register(
+        const registration = await navigator.serviceWorker.register(
           SERVICE_WORKER_PATH,
           { scope: SERVICE_WORKER_SCOPE }
         );
         await navigator.serviceWorker.ready;
 
-        await createOrRefreshPushSubscription(serviceWorkerRegistration, authToken!);
-        hasAlreadySubscribedRef.current = true;
+        await createOrRefreshPushSubscription(registration, authToken!);
+        subscribedRef.current = true;
       } catch {
         // Push notifications are non-critical — silently fail
       }
     }
 
-    initializePushNotifications();
+    init();
   }, [authToken]);
 }

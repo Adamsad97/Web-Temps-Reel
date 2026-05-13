@@ -1,7 +1,8 @@
 'use client';
 
 import { Contact, Role } from '@/types';
-import { NAV_ICONS, Tab } from './constants';
+import { Tab } from './constants';
+import { NAV_ICONS } from './nav-icons';
 
 interface SidebarProps {
   activeTab: Tab;

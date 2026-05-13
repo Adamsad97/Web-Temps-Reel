@@ -59,7 +59,7 @@ export function useDashboardEvents({
         }
       }
       if (msg.type === 'discussion_group_message' && activeTabRef.current !== 'discussions') {
-        const discussionMessage = payload as DiscussionGroupMessage;
+        const discussionMessage = payload as unknown as DiscussionGroupMessage;
         addToast(setToasts, { title: `Groupe — ${discussionMessage.fromName}`, body: (discussionMessage.content || '').slice(0, MESSAGE_PREVIEW_MAX_LENGTH), icon: '💬', kind: 'group' });
       }
       return;

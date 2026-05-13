@@ -1,71 +1,91 @@
 'use client';
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
 
-const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:4000';
+const SOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
 
 type IncomingMessageHandler = (msg: { type: string; payload: unknown }) => void;
 
 export type WebSocketConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
-const RECONNECT_DELAY_MS = 3000;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const WEBSOCKET_PATH = '/ws';
-
 export function useWebSocket(authToken: string | null, onMessage: IncomingMessageHandler) {
-  const wsRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const handlerRef = useRef<IncomingMessageHandler>(onMessage);
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<WebSocketConnectionStatus>('disconnected');
 
   handlerRef.current = onMessage;
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     if (!authToken) return;
 
     setConnectionStatus('connecting');
-    const ws = new WebSocket(`${WEBSOCKET_URL}${WEBSOCKET_PATH}`);
-    wsRef.current = ws;
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'auth', payload: { token: authToken } }));
-      reconnectAttemptsRef.current = 0;
-    };
+    // cours : const socket = io(uri, { auth: { token: "..." } })
+    // Le token est transmis dans socket.handshake.auth côté serveur
+    const socket = io(SOCKET_URL, {
+      auth: { token: authToken },
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 3000,
+    });
 
-    ws.onmessage = (event) => {
-      try {
-        const parsedMessage = JSON.parse(event.data);
-        if (parsedMessage.type === 'auth_ok') {
-          setConnectionStatus('connected');
-        }
-        handlerRef.current(parsedMessage);
-      } catch {}
-    };
+    socketRef.current = socket;
 
-    ws.onclose = () => {
+    // cours : socket.on('connect', () => { ... })
+    socket.on('connect', () => {
+      setConnectionStatus('connected');
+    });
+
+    // cours : socket.on('connect_error', () => { ... })
+    socket.on('connect_error', () => {
+      setConnectionStatus('reconnecting');
+    });
+
+    socket.on('disconnect', () => {
       setConnectionStatus('disconnected');
-      wsRef.current = null;
-      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-        setConnectionStatus('reconnecting');
-        reconnectAttemptsRef.current += 1;
-        reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
-      }
+    });
+
+    socket.on('reconnecting', () => {
+      setConnectionStatus('reconnecting');
+    });
+
+    // Réception de tous les événements métier
+    // cours : socket.on(ev, (data) => { ... })
+    const EVENTS = [
+      'auth_ok',
+      'private_message',
+      'group_message',
+      'typing',
+      'stop_typing',
+      'discussion_group_created',
+      'discussion_group_member_joined',
+      'discussion_group_member_left',
+      'discussion_group_member_connected',
+      'discussion_group_member_disconnected',
+      'discussion_group_message',
+      'discussion_group_typing',
+      'discussion_group_stop_typing',
+      'discussion_group_system',
+      'error',
+    ] as const;
+
+    for (const event of EVENTS) {
+      socket.on(event, (payload: unknown) => {
+        handlerRef.current({ type: event, payload });
+      });
+    }
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      setConnectionStatus('disconnected');
     };
   }, [authToken]);
 
-  useEffect(() => {
-    if (!authToken) return;
-    connect();
-    return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  }, [authToken, connect]);
-
+  // cours : socket.emit(ev, data)
   const send = useCallback((messageType: string, payload: unknown) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: messageType, payload }));
+    if (socketRef.current?.connected) {
+      socketRef.current.emit(messageType, payload);
     }
   }, []);
 

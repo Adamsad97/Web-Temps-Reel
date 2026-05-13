@@ -54,7 +54,7 @@ export interface AuthPayload {
 
 export interface WSMessage {
   type:
-    | 'private_message'
+    |'private_message'
     | 'group_message'
     | 'typing'
     | 'stop_typing'
