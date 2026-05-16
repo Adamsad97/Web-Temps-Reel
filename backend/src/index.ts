@@ -1,3 +1,9 @@
+import path from 'path';
+import dotenv from 'dotenv';
+
+// Charge le .env unique à la racine du projet (un niveau au-dessus de /backend)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
 import express from 'express';
 import cors from 'cors';
 import http from 'http';

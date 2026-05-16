@@ -54,9 +54,18 @@ router.get('/conversations', authMiddleware, (req: AuthRequest, res: Response) =
 
     res.json(clientContacts);
   } else {
-    const otherUsers = users.filter(registeredUser => registeredUser.id !== currentUserId);
+    // Règles de visibilité des contacts :
+    // - Conseiller : voit les clients + les autres conseillers + le directeur
+    // - Directeur  : voit uniquement les conseillers (pas les clients)
+    let allowedUsers: typeof users;
+    if (currentUserRole === 'directeur') {
+      allowedUsers = users.filter(u => u.role === 'conseiller');
+    } else {
+      // conseiller : tout le monde sauf soi-même
+      allowedUsers = users.filter(u => u.id !== currentUserId);
+    }
 
-    const contacts = otherUsers.map(otherUser => {
+    const contacts = allowedUsers.map(otherUser => {
       const lastMessage = messages
         .filter(
           message =>
@@ -68,8 +77,8 @@ router.get('/conversations', authMiddleware, (req: AuthRequest, res: Response) =
     });
 
     contacts.sort((contactA, contactB) => {
-      const aIsStaff = contactA.role === 'conseiller' || contactA.role === 'directeur';
-      const bIsStaff = contactB.role === 'conseiller' || contactB.role === 'directeur';
+      const aIsStaff = contactA.role === 'conseiller';
+      const bIsStaff = contactB.role === 'conseiller';
       if (aIsStaff && !bIsStaff) return -1;
       if (!aIsStaff && bIsStaff) return 1;
       return contactA.name.localeCompare(contactB.name, 'fr');

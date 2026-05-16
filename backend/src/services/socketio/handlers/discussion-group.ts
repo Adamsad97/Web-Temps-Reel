@@ -158,11 +158,15 @@ export function handleDiscussionGroupTyping(
   const actor = findUserById(currentUserId);
   if (!group || !actor) return;
 
-  socket.to(`group:${groupId}`).emit(messageType, {
-    groupId,
-    fromId: currentUserId,
-    fromName: actor.name,
-  });
+  const typingPayload = { groupId, fromId: currentUserId, fromName: actor.name };
+
+  // Membres dans la room groupe (sauf l'émetteur)
+  socket.to(`group:${groupId}`).emit(messageType, typingPayload);
+
+  // Créateur (directeur) via sa room personnelle s'il n'est pas dans la room groupe
+  if (group.createdBy !== currentUserId) {
+    io.to(`user:${group.createdBy}`).emit(messageType, typingPayload);
+  }
 }
 
 export function handleDiscussionGroupMessage(
@@ -189,7 +193,13 @@ export function handleDiscussionGroupMessage(
   };
   discussionGroupMessages.push(groupMsg);
 
+  // Membres dans la room groupe
   io.to(`group:${groupId}`).emit('discussion_group_message', groupMsg);
+
+  // Créateur (directeur) via sa room personnelle si pas dans la room groupe
+  if (group.createdBy !== currentUserId) {
+    io.to(`user:${group.createdBy}`).emit('discussion_group_message', groupMsg);
+  }
 
   const allMembers = new Set([group.createdBy, ...group.memberIds]);
   allMembers.delete(currentUserId);
@@ -201,4 +211,51 @@ export function handleDiscussionGroupMessage(
       `group-${groupId}`
     );
   }
+}
+
+export function handleEditDiscussionGroupMessage(
+  io: Server,
+  socket: Socket,
+  payload: { messageId: string; content: string; groupId: string },
+  currentUserId: string
+): void {
+  const { messageId, content: newContent, groupId } = payload;
+  if (!newContent?.trim()) return;
+
+  const { editDiscussionGroupMessage } = require('../../db');
+  const updatedMsg = editDiscussionGroupMessage(messageId, newContent.trim(), currentUserId);
+  if (!updatedMsg) {
+    socket.emit('error', { message: 'Modification impossible' });
+    return;
+  }
+
+  const group = findDiscussionGroupById(groupId);
+  if (!group) return;
+
+  // Diffuser la modification à tous les membres du groupe
+  io.to(`group:${groupId}`).emit('discussion_group_message_edited', updatedMsg);
+  io.to(`user:${group.createdBy}`).emit('discussion_group_message_edited', updatedMsg);
+}
+
+export function handleDeleteDiscussionGroupMessage(
+  io: Server,
+  socket: Socket,
+  payload: { messageId: string; groupId: string },
+  currentUserId: string
+): void {
+  const { messageId, groupId } = payload;
+
+  const { deleteDiscussionGroupMessage } = require('../../db');
+  const deletedMsg = deleteDiscussionGroupMessage(messageId, currentUserId);
+  if (!deletedMsg) {
+    socket.emit('error', { message: 'Suppression impossible' });
+    return;
+  }
+
+  const group = findDiscussionGroupById(groupId);
+  if (!group) return;
+
+  // Diffuser la suppression à tous les membres du groupe
+  io.to(`group:${groupId}`).emit('discussion_group_message_deleted', { messageId, groupId });
+  io.to(`user:${group.createdBy}`).emit('discussion_group_message_deleted', { messageId, groupId });
 }

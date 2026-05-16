@@ -10,3 +10,4 @@ export {
   handleDiscussionGroupTyping,
   handleDiscussionGroupMessage,
 } from './discussion-group';
+export { handleEditDiscussionGroupMessage, handleDeleteDiscussionGroupMessage } from './discussion-group';

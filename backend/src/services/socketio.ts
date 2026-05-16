@@ -13,6 +13,8 @@ import {
   handleLeaveDiscussionGroup,
   handleDiscussionGroupTyping,
   handleDiscussionGroupMessage,
+  handleEditDiscussionGroupMessage,
+  handleDeleteDiscussionGroupMessage,
 } from './socketio/handlers/index';
 
 // Extension du type Socket pour y attacher userId et role après auth
@@ -106,6 +108,12 @@ export function setupSocketIO(io: Server): void {
     });
     socket.on('discussion_group_message', (payload: { groupId: string; content: string }) => {
       handleDiscussionGroupMessage(io, socket, payload, userId);
+    });
+    socket.on('edit_discussion_group_message', (payload: { messageId: string; content: string; groupId: string }) => {
+      handleEditDiscussionGroupMessage(io, socket, payload, userId);
+    });
+    socket.on('delete_discussion_group_message', (payload: { messageId: string; groupId: string }) => {
+      handleDeleteDiscussionGroupMessage(io, socket, payload, userId);
     });
 
     // ── DÉCONNEXION ──────────────────────────────

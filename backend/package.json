@@ -13,7 +13,8 @@
     "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.0",
     "socket.io": "^4.7.4",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -24,6 +25,7 @@
     "@types/node": "20.19.39",
     "typescript": "5.9.3",
     "ts-node-dev": "^2.0.0",
-    "@types/web-push": "^3.6.3"
+    "@types/web-push": "^3.6.3",
+    "@types/dotenv": "^8.2.0"
   }
 }

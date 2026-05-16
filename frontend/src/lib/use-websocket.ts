@@ -66,6 +66,8 @@ export function useWebSocket(authToken: string | null, onMessage: IncomingMessag
       'discussion_group_typing',
       'discussion_group_stop_typing',
       'discussion_group_system',
+      'discussion_group_message_edited',
+      'discussion_group_message_deleted',
       'error',
     ] as const;
 

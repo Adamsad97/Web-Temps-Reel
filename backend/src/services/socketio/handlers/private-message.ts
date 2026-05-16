@@ -16,6 +16,15 @@ export function handlePrivateMessage(
   const recipient = findUserById(recipientId);
   if (!sender || !recipient || !messageContent?.trim()) return;
 
+  // Règle métier : le directeur ne peut pas échanger de messages privés avec les clients
+  // Un client ne peut pas non plus écrire directement au directeur
+  const isDirecteurToClient  = sender.role === 'directeur' && recipient.role === 'client';
+  const isClientToDirecteur  = sender.role === 'client'    && recipient.role === 'directeur';
+  if (isDirecteurToClient || isClientToDirecteur) {
+    socket.emit('error', { message: 'Les échanges directs entre directeur et client ne sont pas autorisés.' });
+    return;
+  }
+
   const privateMessage: Message = {
     id: uuidv4(),
     fromId: currentUserId,

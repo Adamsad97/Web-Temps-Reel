@@ -323,13 +323,16 @@ export function handleDiscussionGroupTyping(
   const actor = findUserById(currentUserId);
   if (!group || !actor) return;
 
-  // Envoyer à la room du groupe, sauf l'émetteur
-  // cours : socket.to(room).emit(ev, data)
-  socket.to(`group:${groupId}`).emit(messageType, {
-    groupId,
-    fromId: currentUserId,
-    fromName: actor.name,
-  });
+  const typingPayload = { groupId, fromId: currentUserId, fromName: actor.name };
+
+  // Envoyer aux membres dans la room socket.io du groupe (sauf l'émetteur)
+  socket.to(`group:${groupId}`).emit(messageType, typingPayload);
+
+  // Envoyer aussi au créateur via sa room personnelle s'il n'est pas dans la room groupe
+  // (le directeur créateur peut ne pas avoir rejoint la room groupe:xxx)
+  if (group.createdBy !== currentUserId) {
+    io.to(`user:${group.createdBy}`).emit(messageType, typingPayload);
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -360,9 +363,14 @@ export function handleDiscussionGroupMessage(
   };
   discussionGroupMessages.push(groupMsg);
 
-  // Broadcast à tous les membres connectés à la room du groupe
-  // cours : io.to(room).emit(ev, data)
+  // Broadcast à tous les membres dans la room groupe
   io.to(`group:${groupId}`).emit('discussion_group_message', groupMsg);
+
+  // Envoyer aussi au créateur via sa room personnelle
+  // (le directeur peut ne pas être dans la room groupe:xxx)
+  if (group.createdBy !== currentUserId) {
+    io.to(`user:${group.createdBy}`).emit('discussion_group_message', groupMsg);
+  }
 
   // Push pour les membres absents de la room
   const allMembers = new Set([group.createdBy, ...group.memberIds]);

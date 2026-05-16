@@ -4,10 +4,15 @@ import { saveSubscription, removeSubscription, PushSubscription } from '../servi
 
 const router = Router();
 
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BNsGLcL5HXHELz9S7eXti4Gi5kpFo7CX_LAjhE2nhQYRPLAn28wbqTZY_HKKflsXsDzK14mAw5fuOB57qX7wBM4';
+
 
 router.get('/vapid-public-key', (_req, res: Response) => {
-  res.json({ publicKey: VAPID_PUBLIC_KEY });
+  const publicKey = process.env.VAPID_PUBLIC_KEY || '';
+  if (!publicKey) {
+    res.status(503).json({ error: 'VAPID_PUBLIC_KEY non configurée dans .env' });
+    return;
+  }
+  res.json({ publicKey });
 });
 
 router.post('/subscribe', authMiddleware, (req: AuthRequest, res: Response) => {

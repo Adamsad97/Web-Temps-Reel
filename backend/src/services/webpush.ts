@@ -2,9 +2,13 @@ import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
 
-const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY  || 'BNsGLcL5HXHELz9S7eXti4Gi5kpFo7CX_LAjhE2nhQYRPLAn28wbqTZY_HKKflsXsDzK14mAw5fuOB57qX7wBM4';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '6oNVseHKsWM-YBVTZWHqbGmfbx1LkBDd7IAECAcIo60';
+const VAPID_PUBLIC_KEY  = process.env.VAPID_PUBLIC_KEY  || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT     = process.env.VAPID_SUBJECT     || 'mailto:admin@avenir.fr';
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  process.stdout.write('[webpush] ⚠  VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY manquants dans .env\n');
+}
 
 export interface PushSubscription {
   endpoint: string;
@@ -67,6 +71,7 @@ function buildVapidAuthorizationHeader(audience: string): string {
 }
 
 export async function sendWebPushNotification(subscription: PushSubscription, title: string, body: string, tag?: string): Promise<void> {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return;
   const payload = JSON.stringify({ title, body, tag: tag || 'avenir-notif', icon: '/favicon.ico', badge: '/favicon.ico' });
 
   const endpointUrl = new URL(subscription.endpoint);

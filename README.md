@@ -1,5 +1,11 @@
 # AVENIR Bank — Web en Temps Réel
 
+# Membres du groupe
+
+1. DIAWARA Adama
+2. DJECHE FOTSO Christ Arole
+3. BAKAYOKO Bakagnan
+
 ## Prérequis
 
 - https://www.docker.com/

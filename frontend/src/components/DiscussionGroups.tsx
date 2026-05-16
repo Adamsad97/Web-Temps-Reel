@@ -22,6 +22,15 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
   const currentUserId = user?.id ?? '';
 
   const [selectedGroupId, setSelectedGroupId]           = useState<string | null>(null);
+
+  // Le directeur rejoint automatiquement la room Socket.IO quand il sélectionne un groupe
+  // afin de recevoir les messages et les indicateurs de frappe en temps réel
+  const handleSelectGroup = (groupId: string) => {
+    setSelectedGroupId(groupId);
+    if (isDirecteur) {
+      onSend('connect_discussion_group', { groupId });
+    }
+  };
   const [showCreateModal, setShowCreateModal]           = useState(false);
   const [availableConseillers, setAvailableConseillers] = useState<{ id: string; name: string }[]>([]);
 
@@ -38,10 +47,10 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
       .catch(() => {});
   }, [token, isDirecteur]);
 
-  const { latestIncomingGroupMessage, typingNamesByGroupId, latestSystemEventByGroupId } = useDiscussionEvents({
+  const { latestIncomingGroupMessage, latestEditedGroupMessage, latestDeletedGroupMessageId, typingNamesByGroupId, latestSystemEventByGroupId } = useDiscussionEvents({
     latestRealtimeEvent,
     onGroupsChange,
-    onNewGroupSelected: setSelectedGroupId,
+    onNewGroupSelected: (groupId: string) => handleSelectGroup(groupId),
   });
 
   const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
@@ -54,7 +63,7 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
         currentUserId={currentUserId}
         isDirecteur={isDirecteur}
         typingNamesByGroupId={typingNamesByGroupId}
-        onSelect={setSelectedGroupId}
+        onSelect={(groupId: string) => handleSelectGroup(groupId)}
         onJoin={groupId => onSend('join_discussion_group', { groupId })}
         onCreateClick={() => setShowCreateModal(true)}
       />
@@ -68,10 +77,14 @@ export default function DiscussionGroups({ groups, onGroupsChange, onSend, lates
             onConnect={() => onSend('connect_discussion_group', { groupId: selectedGroup.id })}
             onDisconnect={() => onSend('disconnect_discussion_group', { groupId: selectedGroup.id })}
             onLeave={() => { onSend('leave_discussion_group', { groupId: selectedGroup.id }); setSelectedGroupId(null); }}
-            onSendMessage={content => onSend('discussion_group_message', { groupId: selectedGroup.id, content })}
+            onSendMessage={msgContent => onSend('discussion_group_message', { groupId: selectedGroup.id, content: msgContent })}
+            onEditMessage={(messageId, msgContent) => onSend('edit_discussion_group_message', { messageId, content: msgContent, groupId: selectedGroup.id })}
+            onDeleteMessage={messageId => onSend('delete_discussion_group_message', { messageId, groupId: selectedGroup.id })}
             onStartTyping={() => onSend('discussion_group_typing', { groupId: selectedGroup.id })}
             onStopTyping={() => onSend('discussion_group_stop_typing', { groupId: selectedGroup.id })}
             latestIncomingMessage={latestIncomingGroupMessage}
+            latestEditedMessage={latestEditedGroupMessage}
+            latestDeletedMessageId={latestDeletedGroupMessageId}
             currentlyTypingNames={typingNamesByGroupId[selectedGroup.id] || []}
             latestSystemEvent={latestSystemEventByGroupId[selectedGroup.id]}
           />

@@ -16,7 +16,9 @@ export function useDiscussionEvents({
   onGroupsChange,
   onNewGroupSelected,
 }: UseDiscussionEventsProps) {
-  const [latestIncomingGroupMessage, setLatestIncomingGroupMessage] = useState<DiscussionGroupMessage | undefined>();
+  const [latestIncomingGroupMessage, setLatestIncomingGroupMessage]     = useState<DiscussionGroupMessage | undefined>();
+  const [latestEditedGroupMessage, setLatestEditedGroupMessage]         = useState<DiscussionGroupMessage | undefined>();
+  const [latestDeletedGroupMessageId, setLatestDeletedGroupMessageId]   = useState<string | undefined>();
   const [typingNamesByGroupId, setTypingNamesByGroupId]             = useState<Record<string, string[]>>({});
   const [latestSystemEventByGroupId, setLatestSystemEventByGroupId] = useState<Record<string, SystemEventItem | undefined>>({});
   const typingTimeoutsByKey = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -38,13 +40,32 @@ export function useDiscussionEvents({
          'discussion_group_member_connected', 'discussion_group_member_disconnected'].includes(eventType)) {
       const updatedGroup = (eventPayload as { group: DiscussionGroup }).group;
       onGroupsChange(prev =>
-        prev.map(g => g.id === updatedGroup.id ? { ...g, ...updatedGroup } : g)
+        prev.map(g => {
+          if (g.id !== updatedGroup.id) return g;
+          return {
+            ...g,
+            ...updatedGroup,
+            // Préserver members (enrichi par REST) si le WS ne l'envoie pas
+            members: updatedGroup.members ?? g.members,
+          };
+        })
       );
       return;
     }
 
     if (eventType === 'discussion_group_message') {
       setLatestIncomingGroupMessage(eventPayload as unknown as DiscussionGroupMessage);
+      return;
+    }
+
+    if (eventType === 'discussion_group_message_edited') {
+      setLatestEditedGroupMessage(eventPayload as unknown as DiscussionGroupMessage);
+      return;
+    }
+
+    if (eventType === 'discussion_group_message_deleted') {
+      const { messageId } = eventPayload as { messageId: string; groupId: string };
+      setLatestDeletedGroupMessageId(messageId);
       return;
     }
 
@@ -85,5 +106,5 @@ export function useDiscussionEvents({
     }
   }, [latestRealtimeEvent]);
 
-  return { latestIncomingGroupMessage, typingNamesByGroupId, latestSystemEventByGroupId };
+  return { latestIncomingGroupMessage, latestEditedGroupMessage, latestDeletedGroupMessageId, typingNamesByGroupId, latestSystemEventByGroupId };
 }

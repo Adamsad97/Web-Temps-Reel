@@ -51,6 +51,7 @@ export default function DashboardPage() {
   }, [token]);
 
   const handleWebSocketMessage = useDashboardEvents({
+    currentUserId: user?.id ?? '',
     onPrivateMessage: setLatestPrivateMessage,
     onGroupMessage: setLatestGroupMessage,
     onTypingUser: (userId) => setTypingUserId(userId),

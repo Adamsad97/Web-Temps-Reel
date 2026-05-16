@@ -72,7 +72,8 @@ export function createDiscussionGroup(name: string, createdBy: string, createdBy
     createdBy,
     createdByName,
     createdAt: new Date().toISOString(),
-    memberIds,
+    // Inclure le créateur (directeur) dans memberIds pour cohérence du compteur
+    memberIds: memberIds.includes(createdBy) ? memberIds : [createdBy, ...memberIds],
     connectedMemberIds: [],
   };
   discussionGroups.push(group);
@@ -85,4 +86,30 @@ export function findDiscussionGroupById(groupId: string): DiscussionGroup | unde
 
 export function getDiscussionGroupMessages(groupId: string): DiscussionGroupMessage[] {
   return discussionGroupMessages.filter(m => m.groupId === groupId);
+}
+
+export function editDiscussionGroupMessage(
+  messageId: string,
+  newContent: string,
+  requesterId: string
+): DiscussionGroupMessage | null {
+  const msg = discussionGroupMessages.find(m => m.id === messageId);
+  if (!msg) return null;
+  if (msg.fromId !== requesterId) return null; // seul l'auteur peut modifier
+  if (msg.deletedAt) return null;              // impossible de modifier un message supprimé
+  msg.content  = newContent;
+  msg.editedAt = new Date().toISOString();
+  return msg;
+}
+
+export function deleteDiscussionGroupMessage(
+  messageId: string,
+  requesterId: string
+): DiscussionGroupMessage | null {
+  const msg = discussionGroupMessages.find(m => m.id === messageId);
+  if (!msg) return null;
+  if (msg.fromId !== requesterId) return null; // seul l'auteur peut supprimer
+  msg.deletedAt = new Date().toISOString();
+  msg.content   = ''; // vider le contenu
+  return msg;
 }

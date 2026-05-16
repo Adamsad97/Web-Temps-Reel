@@ -41,6 +41,9 @@ export default function GroupList({
           const isMember    = group.memberIds.includes(currentUserId) || isDirecteur;
           const isConnected = group.connectedMemberIds.includes(currentUserId);
           const typingNames = typingNamesByGroupId[group.id] || [];
+          // Nombre de membres = memberIds (source de vérité, toujours à jour via WS)
+          const memberCount    = group.memberIds.length;
+          const connectedCount = group.connectedMemberIds.length;
 
           return (
             <div key={group.id} style={{ borderBottom: '1px solid var(--surface-alt)', background: isActive ? 'var(--bronze-subtle)' : 'transparent' }}>
@@ -54,33 +57,39 @@ export default function GroupList({
                     <circle cx="9" cy="7" r="4" stroke={isActive ? 'var(--slate-900)' : 'var(--text-muted)'} strokeWidth="2"/>
                   </svg>
                 </div>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: '.85rem', fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--bronze-dark)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <p style={{ fontSize: '.85rem', fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--bronze-dark)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
                     {group.name}
                   </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     {typingNames.length > 0 ? (
                       <>
-                        <div style={{ display: 'flex', gap: 3 }}>
-                          <span className="typing-dot" style={{ width: 5, height: 5 }}/>
-                          <span className="typing-dot" style={{ width: 5, height: 5 }}/>
-                          <span className="typing-dot" style={{ width: 5, height: 5 }}/>
-                        </div>
+                        <span className="typing-dot" style={{ width: 4, height: 4 }}/>
+                        <span className="typing-dot" style={{ width: 4, height: 4 }}/>
+                        <span className="typing-dot" style={{ width: 4, height: 4 }}/>
                         <span style={{ fontSize: '.7rem', color: 'var(--bronze)', fontStyle: 'italic' }}>
                           {typingNames.length === 1 ? `${typingNames[0]} écrit…` : 'Plusieurs personnes écrivent…'}
                         </span>
                       </>
                     ) : (
                       <>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: isConnected ? 'var(--success)' : isMember ? 'var(--bronze)' : 'var(--border)', flexShrink: 0 }}/>
+                        {/* Indicateur de connexion personnelle */}
+                        <span style={{
+                          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                          background: isConnected ? 'var(--success)' : isMember ? 'var(--bronze)' : 'var(--border)',
+                        }}/>
                         <span style={{ fontSize: '.7rem', color: 'var(--text-muted)' }}>
-                          {group.connectedMemberIds.length} connecté{group.connectedMemberIds.length > 1 ? 's' : ''}
+                          {connectedCount} connecté{connectedCount > 1 ? 's' : ''}
+                          {memberCount > 0 && ` · ${memberCount} membre${memberCount > 1 ? 's' : ''}`}
                         </span>
                       </>
                     )}
                   </div>
                 </div>
               </button>
+
+              {/* Bouton "Rejoindre" uniquement si non-membre et non-directeur
+                  Pas de boutons Se connecter / Quitter ici — ils sont dans le header du groupe */}
               {!isDirecteur && !isMember && (
                 <div style={{ padding: '0 14px 10px' }}>
                   <button

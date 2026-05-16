@@ -73,6 +73,8 @@ export interface DiscussionGroupMessage {
   fromRole: Role;
   content: string;
   createdAt: string;
+  editedAt?: string;
+  deletedAt?: string;
   type: 'discussion_group';
 }
 

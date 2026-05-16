@@ -89,5 +89,7 @@ export interface DiscussionGroupMessage {
   fromRole: Role;
   content: string;
   createdAt: string;
+  editedAt?: string;    // défini si le message a été modifié
+  deletedAt?: string;   // défini si le message a été supprimé
   type: 'discussion_group';
 }
